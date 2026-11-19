@@ -70,7 +70,12 @@ fireball:
         or a
         ret z
         ld a,(ix+Actor.style)
-        cp 5
+        or a
+        jr nz,.type
+        ld a,(s+State.quest)
+        or a
+        ret nz                  ; second-quest Buzzy Beetles resist fire
+.type:  cp 5
         ret z
         cp 6
         ret z

@@ -124,7 +124,15 @@ text:   call back_address
         jr nz,.letter
         ld a,36
         jr .emit
-.letter:cp 'A'
+.letter:cp '!'
+        jr nz,.dot
+        ld a,HUD_COIN+1
+        jr .emit
+.dot:   cp '.'
+        jr nz,.alnum
+        ld a,HUD_COIN+2
+        jr .emit
+.alnum: cp 'A'
         jr nc,.alpha
         sub '0'
         jr .emit
@@ -148,15 +156,18 @@ hud:    ld hl,$1800
         ld hl,$183a
         ld de,hud_time
         call text
+        call score_value
+        jr hud_coins
+score_value:
         ld hl,$1842
         call back_address
         ld a,(s+State.scorehi)
         call digits
         ld a,(s+State.scorelo)
         call digits
-        xor a
-        call digits
-        ld hl,$184b
+        ld a,(s+State.scorefrac)
+        jp digits
+hud_coins:ld hl,$184b
         call back_address
         ld a,HUD_COIN
         out (VDP),a
@@ -170,7 +181,7 @@ hud:    ld hl,$1800
         ld hl,$1853
         call back_address
         call stage_digits
-        ld hl,$185b
+time_value:ld hl,$185b
         call back_address
         ld a,(s+State.hundred)
         out (VDP),a
@@ -309,6 +320,8 @@ prepare_sprites:
         ld c,a
         call player_half
 .others:ld a,(s+State.scene)
+        cp 5
+        jp nc,goal_sprites
         or a
         jp nz,.submit
         call spring_sprite
@@ -416,6 +429,11 @@ player_half:
         inc c
         inc c
         inc c
+        ; In the dark rescue room the backdrop supplies the outline. Two
+        ; layers each for Mario and his host fit the four-sprite scanline.
+        ld a,(s+State.scene)
+        cp 7
+        ret nc
         ld b,1
         jp screen_layer
 
@@ -517,6 +535,10 @@ enemy_sprite:
         or a
         jp nz,koopa_sprite
         ld c,216
+        ld a,(s+State.quest)
+        or a
+        ld b,4
+        jr nz,.anim
         ld a,(s+State.kind)
         cp 2
         ld b,6

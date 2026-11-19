@@ -70,7 +70,7 @@ animate_mario:
         cp (hl)
         ret z
         ld (hl),a
-        ld l,a
+        ld l,b                  ; one descriptor for both facings
         ld h,0
         add hl,hl
         add hl,hl
@@ -102,6 +102,9 @@ animate_mario:
         add hl,bc
 .addr:  call address
         ex de,hl
+        ld a,(s+State.face)
+        or a
+        jr nz,.mirror
         ld a,(s+State.pipeclip)
         or a
         ld b,96
@@ -127,6 +130,27 @@ animate_mario:
         djnz .right
         dec c
         jr nz,.color
+        ret
+
+; Swap the two 8x16 columns and reflect each byte of each color layer.
+.mirror:ld d,mirror_bits/256
+        ld c,3
+.plane: push hl
+        set 4,l                 ; aligned 32-byte plane: right column first
+        ld b,16
+        call .reverse
+        ex (sp),hl              ; save next plane, retrieve left column
+        ld b,16
+        call .reverse
+        pop hl
+        dec c
+        jr nz,.plane
+        ret
+.reverse:ld e,(hl)
+        ld a,(de)
+        out (VDP),a
+        inc hl
+        djnz .reverse
         ret
 
 anim_tick:

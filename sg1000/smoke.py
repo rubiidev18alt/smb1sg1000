@@ -147,10 +147,13 @@ def run_tape(name):
     riding = 0
     for n, mask in replays[name]:
         for _ in range(n):
+            before = score_value(), st("scene")
             frame(1, *[b for b in range(16) if mask & 1 << b])
             assert st("lives") == 3
             if st("star") or ram[base + symbols["State.star"] + 1]:
                 flags.add("star")
+            if before[1] == 0 and st("scene") == 5:
+                flags.add(("pole", score_value() - before[0]))
             if st("scene") == 1:
                 flags.add("card")
             if st("bonus"):
@@ -200,15 +203,75 @@ def run_tape(name):
     return flags, riding
 
 
+def bcd(name):
+    value = st(name)
+    return (value >> 4) * 10 + (value & 15)
+
+
+def score_value():
+    return bcd("scorehi") * 10000 + bcd("scorelo") * 100 + bcd("scorefrac")
+
+
+def finish_pole(stage, expected=None):
+    # The tape ends on the pole. No further input is needed. Each timer
+    # unit buys 50 points; only 1/3/6 set off 500-point fireworks.
+    assert st("scene") == 5 and st("stage") == stage
+    assert st("endphase") <= 2
+    t = st("hundred") * 100 + bcd("timer")
+    initial = score_value()
+    digit = t % 10
+    count = digit if digit in (1, 3, 6) else 0
+    if expected is not None:
+        assert count == expected
+    flashes = set()
+    raised = False
+    for _ in range(1400):
+        if st("stage") != stage:
+            break
+        if st("endphase") == 3:
+            raised = True
+        if st("endphase") == 4:
+            flashes.add(st("bursts"))
+        frame(1)
+    assert raised and len(flashes) == count
+    assert st("stage") == stage + 1 and not st("timer") and not st("hundred")
+    assert score_value() == initial + t * 50 + count * 500
+
+
+def finish_castle(stage):
+    for _ in range(80):
+        if st("scene") == 6:
+            break
+        frame(1)
+    assert st("stage") == stage and st("scene") == 6
+    remaining = []
+    met_host = False
+    for _ in range(1300):
+        if st("scene") == 6:
+            remaining.append(sum(ram[16 * x + 8] == 0x89 for x in range(13)))
+        if st("scene") == 7 and st("forced") == 1:
+            met_host = True
+        if st("scene") == 8 or st("stage") != stage:
+            break
+        frame(1)
+    assert met_host and len(set(remaining)) >= 10 and remaining[-1] == 0
+    if stage != 31:
+        assert st("stage") == stage + 1 and st("scene") == 1
+    else:
+        assert st("stage") == 31 and st("scene") == 8
+
+
 select()
 flags, _ = run_tape("star-and-flag")
-assert "star" in flags and st("stage") == 1
+assert {"star", ("pole", 100)} <= flags
+finish_pole(0, 6)
 wait_entry(1)
 assert st("kind") == 2 and st("py") == 160
 core.retro_reset()
 select()
 flags, _ = run_tape("bonus-pipe")
-assert "bonus" in flags and st("stage") == 1
+assert {"bonus", ("pole", 2000)} <= flags
+finish_pole(0)
 core.retro_reset()
 select(1)
 for _ in range(350):
@@ -242,7 +305,8 @@ assert st("floor") and st("py") == 96 and 304 <= scroll() + st("px") < 336
 core.retro_reset()
 select(2)
 _, riding = run_tape("lifts-1-3")
-assert st("stage") == 3 and riding >= 10
+assert riding >= 10
+finish_pole(2)
 core.retro_reset()
 sample_sea = True
 select(5)
@@ -251,11 +315,13 @@ assert sea_pixels[0] != sea_pixels[-1] and len(set(sea_pixels[1:9])) >= 2
 assert len(set(sea_pixels[-3:])) == 1  # same sea ink in all three banks
 assert st("theme") == 1 and ram[1] == 0x8D
 flags, _ = run_tape("swim-2-2")
-assert {4, 14} <= flags and 9 not in flags and st("stage") == 6
+assert {4, 14} <= flags and 9 not in flags and st("outside")
+finish_pole(5)
 core.retro_reset()
 select(25)
 flags, _ = run_tape("swim-7-2")
-assert {4, 14} <= flags and 9 not in flags and st("stage") == 26
+assert {4, 14} <= flags and 9 not in flags and st("outside")
+finish_pole(25)
 core.retro_reset()
 select(13)  # fourth shared pipe entrance: 4-2
 core.retro_reset()
@@ -265,7 +331,20 @@ assert {144, 152, 156, "offscreen", "returned"} <= flags
 core.retro_reset()
 select(7)
 flags, _ = run_tape("castle-2-4")
-assert {13, 6, 5} <= flags and st("stage") == 8  # Podoboo, firebar, Bowser
+assert {13, 6, 5} <= flags  # Podoboo, firebar, Bowser
+finish_castle(7)
+core.retro_reset()
+select(31)
+run_tape("final-8-4")
+finish_castle(31)
+frame(360)
+assert st("scene") == 8
+frame(3, 8)
+frame(90)
+assert st("quest") == 1 and st("stage") == 0
+frame(2, 8)
+frame(3)
+assert st("stage") == 4  # Button 2 selects worlds on the second quest
 core.retro_reset()
 frame(120)
 for i in range(1, 33):
@@ -352,5 +431,5 @@ assert st("lives") == 3 and st("stage") == 0
 assert video_sizes == {(256, 192)}
 core.retro_deinit()
 print(
-    f"PASS: {video_frames} frames; 1-1 Starman and bonus routes, 1-2 roof to world 2, 1-3 moving lifts, 2-1 spawn, 2-2 and 7-2 swims, 2-4 castle clear, 5-2 spring and offscreen return, 6-2 four-block standing jump, lives cards and pipe intros, music, selector wrap, pit death, hurry-up and last-life timeout"
+    f"PASS: {video_frames} frames; 1-1 Starman and bonus routes, 1-2 roof to world 2, 1-3 moving lifts, 2-1 spawn, 2-2 and 7-2 swims, 2-4 castle clear, 5-2 spring and offscreen return, 6-2 four-block standing jump, lives cards and pipe intros, music, selector wrap, pit death, hurry-up and last-life timeout; timer bonuses, fireworks, bridge collapse, Toad and Peach endings"
 )

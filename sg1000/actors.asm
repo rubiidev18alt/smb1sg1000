@@ -18,6 +18,9 @@ update_actors:
         bit 7,d
         jr z,.position
         res 7,d
+        ld a,(s+State.quest)
+        or a
+        jr nz,.position
         ld a,(s+State.stage)
         cp 18                   ; secondary hard mode starts at 5-3
         jr c,.consume
@@ -84,7 +87,10 @@ walker: ld a,(ix+Actor.active)
         jr z,.run
 .normal:ld a,(s+State.tick)
         and 1
-        jr nz,.fall
+        jr z,.run
+        ld a,(s+State.quest)
+        or a
+        jr z,.fall
 .run:
         ld a,(ix+Actor.dir)
         add a,(ix+Actor.x)
@@ -200,7 +206,7 @@ walker: ld a,(ix+Actor.active)
         jr z,.kick
         ld a,(s+State.vy)
         bit 7,a
-        jr nz,.hurt
+        jp nz,.hurt
         ld a,b
         cp 10
         jr nc,.hurt
@@ -209,7 +215,13 @@ walker: ld a,(ix+Actor.active)
         ld a,1
         call points
         ld a,(ix+Actor.style)
-        cp 1
+        or a
+        jr nz,.koopa
+        ld a,(s+State.quest)
+        or a
+        jr nz,.shell
+        jr .remove
+.koopa: cp 1
         jr z,.shell
         cp 3
         jr nz,.remove

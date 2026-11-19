@@ -75,6 +75,13 @@ spring_x byte
 spring_t byte                   ; compression/rebound countdown
 satpage byte                    ; 0 or 4: SAT at $1b00 or $1f00
 posetab byte                    ; 0 or 104: active pose pattern base
+scorefrac byte                  ; packed BCD points below one hundred
+endphase byte                   ; goal sprite state
+bursts byte
+effect_y byte
+effect_x byte
+quest byte                      ; cleared on power-on, earned by rescuing Peach
+outside byte                    ; emerged from an underground/water exit
 expired byte                    ; set only by the timer, not by enemy/pit deaths at 000
         ends
 s       equ $c100
@@ -189,6 +196,7 @@ title:  call silence
         ld (s+State.stage),a
         ld (s+State.scene),a
         ld (s+State.retry),a
+        ld (s+State.scorefrac),a
         ld (s+State.scorelo),a
         ld (s+State.scorehi),a
         ld (s+State.coins),a
@@ -238,8 +246,13 @@ title:  call silence
         jr nz,restart
         bit 5,a
         jr z,.wait
-.increment:ld a,(s+State.stage)
-        inc a
+.increment:ld a,(s+State.quest)
+        or a
+        ld a,1
+        jr z,.select_step
+        ld a,4
+.select_step:ld hl,s+State.stage
+        add a,(hl)
         and 31
         ld (s+State.stage),a
         jr .select
@@ -316,8 +329,47 @@ play:   call prepare_sprites
         or a
         sbc hl,de
         jr c,.render
-        ld a,(s+State.stage)
+        ld a,(s+State.kind)
+        cp 3
+        jr nz,.not_axe
+        ; Contact with the axe, not an invisible line above the bridge.
+        ld a,h
+        or a
+        jr nz,.render
+        ld a,l
+        cp 38
+        jr nc,.render
+        ld a,(s+State.py)
+        cp 81
+        jr c,.render
+        cp 113
+        jp c,finish_area
+        jr .render
+.not_axe:ld a,(s+State.kind)
         cp 1
+        jr nz,.side
+        ld a,h
+        or a
+        jr nz,.render
+        ld a,l
+        cp 30
+        jr nc,.render
+        ld a,(s+State.above)
+        or a
+        jr nz,.render
+        ld a,(s+State.py)
+        cp 156                  ; the stone base is not the pole
+        jp c,finish_area
+        jr .render
+.side:  or a
+        jr nz,.underground
+        ld a,(s+State.py)
+        cp 64                   ; swimmer intersects the two-row pipe mouth
+        jr c,.render
+        cp 112
+        jp c,finish_area
+        jr .render
+.underground:cp 2
         jp nz,finish_area
         ld a,(s+State.bonus)
         or a
@@ -365,6 +417,7 @@ load_stage:
         ld (s+State.divider),a
         xor a
         ld (s+State.timer),a
+        ld (s+State.outside),a
         ld (s+State.expired),a
         ld (s+State.bonus),a
         ld l,a
@@ -411,6 +464,13 @@ load_area:
         add hl,de
         ld a,(hl)
 .backdrop:
+        ld b,a
+        ld a,(s+State.outside)
+        or a
+        ld a,b
+        jr z,.ink
+        ld a,5
+.ink:
         out (CTRL),a
         ld a,$87
         out (CTRL),a
@@ -424,7 +484,13 @@ load_area:
         ld hl,stage_theme
         add hl,de
         ld a,(hl)
-.palette:call set_theme
+.palette:ld b,a
+        ld a,(s+State.outside)
+        or a
+        ld a,b
+        jr z,.apply
+        ld a,1
+.apply: call set_theme
         xor a
         ld hl,(s+State.entry)
         ld (s+State.scroll),hl
@@ -493,7 +559,15 @@ load_area:
         ld hl,sprites+(184-24)*8
 .upload:ld de,256
         call transfer
-        ld a,(s+State.kind)
+        ld a,(s+State.quest)
+        or a
+        jr z,.music
+        ld hl,$3800+216*8
+        call address
+        ld hl,beetle_art
+        ld de,128
+        call transfer
+.music: ld a,(s+State.kind)
         call start_music
         ld a,1
         ld (s+State.dirty),a
@@ -574,6 +648,9 @@ start_text: db ' PRESS BUTTON 1 ',0
 
 ; Match the pipe under Mario against the original area's warp links.
 try_pipe:
+        ld a,(s+State.outside)
+        or a
+        ret nz
         ld a,(s+State.pad)
         bit 1,a
         ret z
@@ -667,72 +744,6 @@ try_pipe:
         ld (s+State.entry),hl
         pop hl
         jp load_area
-
-slide_pole:
-        ld hl,(s+State.goal)
-        ld de,(s+State.scroll)
-        or a
-        sbc hl,de
-        ld a,l
-        ld (s+State.px),a
-        ld a,(s+State.ready)
-        or a
-        call nz,flip
-        ld a,8                  ; climbing pose + 1
-        ld (s+State.forced),a
-        ld b,56
-.slide: push bc
-        call music_tick
-        ld a,b
-        rrca
-        rrca
-        rrca
-        and 1
-        add a,8
-        ld (s+State.forced),a
-        call vblank
-        ld hl,s+State.flag_y
-        inc (hl)
-        inc (hl)
-        ld a,(s+State.py)
-        cp 144
-        jr nc,.draw
-        inc a
-        inc a
-        ld (s+State.py),a
-.draw:  call draw_sprites
-        pop bc
-        djnz .slide
-        xor a
-        ld (s+State.face),a
-        ld a,2
-        ld (s+State.forced),a
-        ld b,64
-.walk:  push bc
-        call music_tick
-        call vblank
-        ld hl,s+State.px
-        inc (hl)
-        ld a,b
-        and 7
-        jr nz,.keep
-        ld a,(s+State.forced)
-        inc a
-        cp 5
-        jr c,.set
-        ld a,2
-.set:   ld (s+State.forced),a
-.keep:  call camera
-        ld a,(s+State.dirty)
-        or a
-        jr z,.sat
-        call present_map
-        call vblank
-        call flip
-.sat:   call draw_sprites
-        pop bc
-        djnz .walk
-        ret
 
         include "player.asm"
         include "actors.asm"
@@ -839,7 +850,7 @@ died:   ld sp,$c400             ; also reachable from nested actor collision
         call message_card
         ; GameOverInter sets ScreenTimer to $12 (18 * 21 video frames).
         ld bc,378
-        call banner.wait
+        call game_over_wait
         jp title
 finish_area:
         ld a,(s+State.bonus)
@@ -855,35 +866,9 @@ finish_area:
         ld a,(s+State.exity)
         ld (s+State.py),a
         jp play
-clear_stage:
-        ld a,(s+State.kind)
-        cp 3
-        ld a,7
-        jr nz,.tune
-        inc a
-.tune:  call start_music
-        xor a
-        ld (s+State.retry),a
-        ld a,(s+State.kind)
-        cp 1
-        call z,slide_pole
-        ld a,$10
-        call points
-        ld hl,s+State.stage
-        inc (hl)
-        ld a,(hl)
-        cp 32
-        jr c,.next
-        dec (hl)                ; final HUD still reads 8-4
-        ld a,9
-        call start_music
-        ld de,win_text
-        call banner
-        jp title
-.next:  call finish_song
-        jp restart
-banner: call message_card
-        ld bc,240
+        include "goals.asm"
+beetle_art: incbin "../build/sg1000/beetle.bin"
+game_over_wait:
 .wait:  push bc
         call vblank
         call music_tick
@@ -898,7 +883,7 @@ banner: call message_card
         jr nz,.wait
         ret
 over_text: db '      GAME OVER',0
-win_text: db ' PEACH IS RESCUED  ',0
+
 
         include "intermission.asm"
         include "music.asm"
@@ -916,10 +901,12 @@ sprites:  incbin "../build/sg1000/sprites.bin",24*8
 sprites_end:
 outdoor_patterns: incbin "../build/sg1000/outdoor.bin"
 swim_patterns: incbin "../build/sg1000/swim.bin"
+        align 32                ; mirrored pose uploader selects column via bit 4
 mario_data: incbin "../build/sg1000/mario.bin"
         include "../build/sg1000/poses.inc"
         include "../build/sg1000/glyphs.inc"
         align 256
+mirror_bits: incbin "../build/sg1000/mirror.bin"
 metatiles: incbin "../build/sg1000/meta.bin"
 solids: incbin "../build/sg1000/solid.bin"
         include "../build/sg1000/areas.inc"

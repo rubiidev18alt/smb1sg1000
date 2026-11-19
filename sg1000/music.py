@@ -60,7 +60,7 @@ def compile_music(root, out):
             f"song{i}: dw "
             + ",".join(song)
             + ",0,"
-            + ("song1+2" if i == 1 else f"song{i}" if i < 5 else "0")
+            + ("song1+2" if i == 1 else f"song{i}" if i < 5 or i == 9 else "0")
         ]
     for hdr in sorted({hdr for song in songs for hdr in song}):
         tempo, base, offset = headers[hdr]

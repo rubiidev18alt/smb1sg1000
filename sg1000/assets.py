@@ -427,6 +427,9 @@ def graphics():
                 meta[i * 256 + 0x8D] = meta[(i % 2) * 256 + idx]
         flags[idx] = int("MTILE_SOLID" in line and idx not in (0xC2, 0xC3, 0x24, 0x25))
         idx += 1
+    for q in range(4):
+        meta[q * 256 + 0x8E] = 248 + q
+        meta[q * 256 + 0x8F] = 252 + q
     # Add HUD punctuation without consuming another metatile palette group.
     # Unused glyphs at the very end of the pattern bank.
     # Decode only the title sign from the NES PPU update stream, not its
@@ -454,6 +457,9 @@ def graphics():
     (OUT / "glyphs.inc").write_text(
         f"DASH equ {len(patterns) // 8 - 2}\nHUD_COIN equ DASH+1\n"
     )
+    for rows in ([24, 24, 24, 24, 24, 0, 24, 0], [0, 0, 0, 0, 0, 0, 24, 0]):
+        patterns.extend(rows)
+        colors.extend([0xD0] * 8)
     pulse_ids = sorted(
         {
             meta[quarter * 256 + tile]
@@ -564,12 +570,49 @@ def graphics():
     assert len(sprites) == 256
     (OUT / "swim.bin").write_bytes(sprites)
 
+    # Stream ending-only sprites into the 184..215 environment slot.
+    sprites = bytearray()
+
+    def pieces(bank, left, right=None, masks=((1, 3), (2,))):
+        a = bank[left * 16 : (left + 2) * 16]
+        b = (
+            bytes(int(f"{v:08b}"[::-1], 2) for v in a)
+            if right is None
+            else bank[right * 16 : (right + 2) * 16]
+        )
+        pair(a + b, range(4), masks)
+
+    pieces(enemy, 0x3C, 0x3E)  # roof flag
+    for n in (0x26, 0x28, 0x2A):
+        pieces(misc, n, masks=((1, 3), (2,)))
+    (OUT / "celebration.bin").write_bytes(sprites)
+    sprites = bytearray()
+    for left, right in [(6, 0x10), (10, 0x10), (14, 0x10), (8, 4), (12, 4)]:
+        pieces(misc, left, right, ((1, 2, 3),))
+    (OUT / "pole_scores.bin").write_bytes(sprites)
+    for name, pairs in [
+        ("toad", [(0x10, None), (0x12, None)]),
+        ("peach", [(0x14, 0x16), (0x34, None)]),
+    ]:
+        sprites = bytearray()
+        for left, right in pairs:
+            pieces(
+                boss, left, right, ((1, 2), (3,)) if name == "peach" else ((1,), (2, 3))
+            )
+        (OUT / (name + ".bin")).write_bytes(sprites)
+
+    sprites = bytearray()
+    for pose in (0, 4):
+        pieces(enemy, pose, pose + 2)
+    (OUT / "beetle.bin").write_bytes(sprites)
+
 
 def mario_frames(banks):
     """Expand the source 8x16 pairs, deduplicating identical 16x16 halves.
     A frame descriptor names just two halves; only changed poses are uploaded.
     """
     src = (ROOT / "src/metasprite.s").read_text()
+    bridge = bytearray()
     frames = []
     halves = {}
     data = bytearray()
@@ -619,22 +662,48 @@ def mario_frames(banks):
             if obj == "FIRE_MARIO" and pose == "CROUCHING":
                 bank = 3
             bank = banks[bank * 1024 :]
-            for flip in (False, True):
-                ptrs = []
+            ptrs = []
+            for i in range(0, len(ids), 2):
+                raw = b"".join(bank[n * 16 : n * 16 + 32] for n in ids[i : i + 2])
+                buf = bytearray()
+                for mask in ((1,), (2,), (3,)):
+                    sprite(buf, raw, 0, False, mask)  # mirror in the uploader
+                if bytes(buf) not in halves:
+                    halves[bytes(buf)] = len(data)
+                    data.extend(buf)
+                ptrs.append("mario_data+" + str(halves[bytes(buf)]))
+            if pose == "STANDING":
+                # A stationary Mario can be painted into the bridge scene.
+                # This leaves all four sprites on Bowser's scanlines available.
+                pats, inks = bytearray(), bytearray()
                 for i in range(0, len(ids), 2):
-                    raw = b"".join(bank[n * 16 : n * 16 + 32] for n in ids[i : i + 2])
-                    buf = bytearray()
-                    for mask in ((1,), (2,), (3,)):
-                        sprite(buf, raw, 0, flip, mask)
-                    if bytes(buf) not in halves:
-                        halves[bytes(buf)] = len(data)
-                        data.extend(buf)
-                    ptrs.append("mario_data+" + str(halves[bytes(buf)]))
-                if len(ptrs) == 1:
-                    ptrs.insert(0, "0")
-                frames.append(" dw " + ",".join(ptrs))
+                    for tile in (ids[i], ids[i + 1], ids[i] + 1, ids[i + 1] + 1):
+                        for row in pixels(bank, tile):
+                            # The black castle backdrop supplies the outline.
+                            colors = [
+                                (0, 15 if size == "FIRE" else 8, 11, 0)[v] for v in row
+                            ]
+                            used = sorted(
+                                set(colors),
+                                key=lambda c: (colors.count(c), c),
+                                reverse=True,
+                            )
+                            bg = 0 if 0 in used else used[-1]
+                            fg = next((c for c in used if c != bg), bg)
+                            inks.append(fg * 16 + bg)
+                            pats.append(
+                                sum((c != bg) << (7 - x) for x, c in enumerate(colors))
+                            )
+                bridge.extend(pats.rjust(64, b"\0") + inks.rjust(64, b"\0"))
+            if len(ptrs) == 1:
+                ptrs.insert(0, "0")
+            frames.append(" dw " + ",".join(ptrs))
+    (OUT / "bridge_mario.bin").write_bytes(bridge)
     (OUT / "poses.inc").write_text("pose_list:\n" + "\n".join(frames) + "\n")
     (OUT / "mario.bin").write_bytes(data)
+    (OUT / "mirror.bin").write_bytes(
+        bytes(int(f"{i:08b}"[::-1], 2) for i in range(256))
+    )
 
 
 def sprite(out, raw, pose, flip, mask):

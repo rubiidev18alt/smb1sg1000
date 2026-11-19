@@ -51,6 +51,27 @@ class CartridgeTest(unittest.TestCase):
         self.assertEqual({style & 15 for _, _, style in spawns}, {4, 14})
         self.assertIn(9, {style & 15 for _, _, style in area("GroundArea18", 1)[2]})
 
+    def test_ending_rooms(self):
+        # The bridge wipe addresses the axe, chain and 13 consecutive boards.
+        # The rescued character stands twelve columns into the same room.
+        for n in range(1, 7):
+            name = f"CastleArea{n}"
+            cols, goal, _ = area(name, 3)
+            self.assertEqual(cols[goal][6], 0xC5)
+            self.assertEqual(cols[goal - 1][7], 0x0C)
+            self.assertTrue(all(c[8] == 0x89 for c in cols[goal - 13 : goal]))
+            self.assertIn(
+                (goal + 12, 0, 0x35), list(objects(table("E_" + name) + [255], True))
+            )
+        for filename, length in [
+            ("bridge_mario", 3 * 128),
+            ("toad", 128),
+            ("peach", 128),
+            ("celebration", 256),
+            ("pole_scores", 5 * 32),
+        ]:
+            self.assertEqual((OUT / (filename + ".bin")).stat().st_size, length)
+
     def test_rom_tables(self):
         import re
 
