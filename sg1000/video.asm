@@ -10,6 +10,10 @@ flip:   ld a,(s+State.back)
         out (CTRL),a
         ld a,$82
         out (CTRL),a
+        ld a,$c2                ; show the fully composed area after a palette swap
+        out (CTRL),a
+        ld a,$81
+        out (CTRL),a
         ld a,(s+State.back)
         xor 1
         ld (s+State.back),a
@@ -411,6 +415,8 @@ enemy_sprite:
         ld e,(ix+Actor.y)
         dec e
         ld a,(ix+Actor.style)
+        cp 14
+        jp z,blooper_sprite
         cp 7
         jr c,.ordinary
         sub 7
@@ -447,13 +453,39 @@ enemy_sprite:
         or a
         jp nz,koopa_sprite
         ld c,216
+        ld a,(s+State.kind)
+        cp 2
         ld b,6
+        jr nz,.anim
+        ld b,4
 .anim:  ld a,(s+State.tick)
         and 8
         add a,c
         ld c,a
         jr .pair
-.fish:  ld b,8
+.fish:  ld a,(s+State.tick)
+        and 8
+        ld c,168
+        jr z,.fish_color
+        ld c,208
+.fish_color:ld b,14
+        ld a,(s+State.stage)
+        cp 5
+        jr z,.mix
+        ld b,8                  ; reverse gray/red predominance in 7-2
+.mix:   ld a,(ix+Actor.y)       ; deterministic variant for this swimming lane
+        and $30
+        cp $30
+        jr nz,.fish_ink
+        ld a,b
+        xor 6                   ; swap TMS gray (14) and red (8)
+        ld b,a
+.fish_ink:call layer
+        ld a,c
+        add a,4
+        ld c,a
+        ld b,15
+        jp layer
 .pair:  call layer
         ld a,c
         add a,4
@@ -511,8 +543,12 @@ koopa_sprite:
         ld a,e
         add a,16
         ld e,a
-.half:  ld b,12
-        call layer
+.half:  ld a,(s+State.kind)
+        cp 2
+        ld b,12
+        jr nz,.shell_ink
+        ld b,4
+.shell_ink:call layer
         ld a,c
         add a,4
         ld c,a
@@ -537,11 +573,34 @@ pulse_tiles:
         rrca
         rrca
         rrca
-        and 3
-        ld hl,pulse_colors
+        and 1
+        ld hl,pulse_light
         ld de,PULSE_BYTES
         jr z,.upload
-        ld b,a
-.phase: add hl,de
-        djnz .phase
+        ld hl,pulse_dark
 .upload:jp transfer
+
+; Water-bank patterns 184..207 hold the two-part extended squid and the
+; contracted pose. Both use the original mirrored left/right CHR halves.
+blooper_sprite:
+        ld a,(ix+Actor.dir)
+        and 32
+        ld c,200
+        jr nz,.half
+        ld c,184
+        ld a,e
+        sub 16
+        ld e,a
+        call .half
+        ld a,e
+        add a,16
+        ld e,a
+        ld c,192
+.half:  ld b,15
+        call layer
+        inc c
+        inc c
+        inc c
+        inc c
+        ld b,1
+        jp layer

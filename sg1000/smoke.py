@@ -26,6 +26,8 @@ buttons = ()
 audible_batches = 0
 video_frames = 0
 video_sizes = set()
+sample_sea = False
+sea_pixels = []
 
 
 def register(name, result, args, fn):
@@ -38,6 +40,12 @@ def video(data, width, height, pitch):
     global video_frames
     video_sizes.add((width, height))
     video_frames += 1
+    if sample_sea:
+        # Left edge of the opening water screen: sky, crest below HUD, sea.
+        sea_pixels[:] = [
+            C.c_uint16.from_address(data + pitch * y).value
+            for y in (0, *range(24, 32), 40, 80, 144)
+        ]
 
 
 def audio(data, count):
@@ -91,12 +99,22 @@ def frame(n, *keys):
 
 def select(slot=0):
     frame(120)
+    assert ram[symbols["playing"] - 0xC000] == 0
     assert st("stage") == 0 and st("lives") == 3
     for _ in range(slot):
         frame(2, 8)
         frame(2)
     frame(3, 0)
-    frame(45)
+    # Changing all three color banks takes a few video frames; begin the
+    # tape at a specific simulation tick, not during the palette upload.
+    for _ in range(80):
+        if slot == 0 and 2 <= st("tick") <= 6:
+            p = symbols["playlist"] - 0xC000
+            assert ram[p] + 256 * ram[p + 1] == symbols["song1"] + 2  # lead-in playing
+        if st("tick") == 47:
+            break
+        frame(1)
+    assert st("tick") == 47
 
 
 def run_tape(name):
@@ -119,7 +137,7 @@ def run_tape(name):
                 and ram[(st("px") + 8) & 0xF0] == 0x52
             ):
                 flags.add("roof")
-            if name == "castle-2-4":
+            if name in ("castle-2-4", "swim-2-2", "swim-7-2"):
                 for i in (0, 5):
                     p = symbols["actors"] - 0xC000 + i
                     if ram[p]:
@@ -158,6 +176,19 @@ core.retro_reset()
 select(2)
 _, riding = run_tape("lifts-1-3")
 assert st("stage") == 3 and riding >= 10
+core.retro_reset()
+sample_sea = True
+select(5)
+sample_sea = False
+assert sea_pixels[0] != sea_pixels[-1] and len(set(sea_pixels[1:9])) >= 2
+assert len(set(sea_pixels[-3:])) == 1  # same sea ink in all three banks
+assert st("theme") == 1 and ram[1] == 0x8D
+flags, _ = run_tape("swim-2-2")
+assert {4, 14} <= flags and 9 not in flags and st("stage") == 6
+core.retro_reset()
+select(25)
+flags, _ = run_tape("swim-7-2")
+assert {4, 14} <= flags and 9 not in flags and st("stage") == 26
 core.retro_reset()
 select(7)
 flags, _ = run_tape("castle-2-4")
@@ -203,5 +234,5 @@ assert st("lives") == 3 and st("stage") == 0
 assert video_sizes == {(256, 192)}
 core.retro_deinit()
 print(
-    f"PASS: {video_frames} frames; 1-1 Starman and bonus routes, 1-2 roof to world 2, 1-3 moving lifts, 2-1 spawn, 2-4 castle clear, music, selector wrap and restart"
+    f"PASS: {video_frames} frames; 1-1 Starman and bonus routes, 1-2 roof to world 2, 1-3 moving lifts, 2-1 spawn, 2-2 and 7-2 swims, 2-4 castle clear, music, selector wrap and restart"
 )

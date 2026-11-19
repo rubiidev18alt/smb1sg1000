@@ -37,8 +37,19 @@ class CartridgeTest(unittest.TestCase):
         meta = (OUT / "meta.bin").read_bytes()
         colors = (OUT / "colors.bin").read_bytes()
         body = meta[0x8B] * 8
-        self.assertTrue(all(b == 0x88 for b in colors[body : body + 8]))
-        self.assertNotEqual(meta[0x8B], meta[0x87])  # overworld water stays blue
+        # Same logical NES ink, resolved through two different area palettes.
+        themes = (OUT / "themes.bin").read_bytes()
+        self.assertEqual(meta[0x8B], meta[0x87])
+        for pair in colors[body : body + 8]:
+            self.assertEqual(themes[3 * 16 + (pair >> 4)], 8)  # lava red
+            self.assertEqual(themes[pair >> 4], 4)  # water blue
+
+    def test_sea(self):
+        cols, _, spawns = area("WaterArea2", 0)
+        self.assertEqual(cols[0][:3], [0x86, 0x8D, 0x87])
+        self.assertIn(0xC3, {t for col in cols for t in col})
+        self.assertEqual({style & 15 for _, _, style in spawns}, {4, 14})
+        self.assertIn(9, {style & 15 for _, _, style in area("GroundArea18", 1)[2]})
 
     def test_rom_tables(self):
         import re
@@ -60,6 +71,12 @@ class CartridgeTest(unittest.TestCase):
         for world in range(1, 9):
             stages.extend(v for v in table(f"World{world}Areas", common) if v != 0x29)
         self.assertEqual(len(stages), 32)
+        self.assertEqual(word(symbols["song1"]), symbols["GroundLevelLeadInHdr"])
+        self.assertEqual(word(symbols["song1"] + 2), symbols["GroundLevelPart1Hdr"])
+        themes = symbols["stage_theme"]
+        self.assertEqual(
+            [rom[themes + i] for i in (0, 1, 3, 5, 8, 14, 22)], [1, 2, 3, 0, 4, 5, 3]
+        )
         skies = symbols["stage_sky"]
         self.assertEqual((rom[skies + 4], rom[skies + 8]), (5, 1))  # 2-1 day, 3-1 night
         for i, v in enumerate(stages):

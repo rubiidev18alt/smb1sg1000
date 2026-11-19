@@ -113,6 +113,9 @@ def area(name, kind):
                         0,
                     ][b],
                 )
+            elif op == 4 and kind == 0:
+                for j in range(n):
+                    put(x + j, y, 0xC3)  # underwater coin
             elif op == 7:
                 for j in range(2):
                     put(x + j, y, (0x10 if b & 8 else 0x12) + j)
@@ -135,9 +138,20 @@ def area(name, kind):
                         else (0x19 if data[1] >> 6 == 1 else 0x16)
                         + (0 if j == 0 else 2 if j == n - 1 else 1),
                     )
-                    if op == 1 and j == n // 2:
-                        for k in range(y + 1, 11):
-                            put(xx, k, 0x4C)
+                    if op == 1:
+                        mushroom = data[1] >> 6 == 1
+                        if (mushroom and j == n // 2) or (
+                            not mushroom and 0 < j < n - 1
+                        ):
+                            for k in range(y + 1, 11):
+                                if cols[xx][k] in (0, 0x4C):
+                                    put(
+                                        xx,
+                                        k,
+                                        (0x4F if k == y + 1 else 0x50)
+                                        if mushroom
+                                        else 0x4C,
+                                    )
         elif y == 12:
             for xx in range(x, x + n):
                 if op in (0, 5):
@@ -149,6 +163,8 @@ def area(name, kind):
                             if op == 5 and k == 10
                             else 0x87
                             if op == 5 and k == 11
+                            else 0x87
+                            if kind == 0
                             else 0,
                         )
                 elif op in (2, 3, 4):
@@ -196,15 +212,26 @@ def area(name, kind):
         goal = width - 18
         put(goal, 8, 0xC5)
     if kind == 3:
-        # The NES shares water and lava CHR and swaps the background palette.
-        # Graphics II colors are bound to a pattern, so use castle-only IDs.
+        # Lava shares the water pattern/ink slots. Keep distinct metatile
+        # IDs for damage and breakable-brick collision, not separate CHR.
         for col in cols:
             for row, tile in enumerate(col):
                 if tile in (0x86, 0x87):
                     col[row] = tile + 4
                 elif tile == 0x52:
                     col[row] = 0x8C  # castle brick uses gray mortar
+    if kind == 0:
+        # The first 24 pixels are HUD on SG. Place the crest in the first
+        # visible half-row; leave solid geometry at its source coordinates.
+        for col in cols:
+            if col[0] == 0x86 and col[1] == 0x87:
+                col[1] = 0x8D
     spawns = []
+    depths = (
+        table("Enemy17YPosData", (ROOT / "src/object.s").read_text())
+        if kind == 0
+        else []
+    )
     for x, y, b in objs:
         if y == 13 and b in (0x48, 0x49):
             end = next(
@@ -216,7 +243,12 @@ def area(name, kind):
                 goal,
             )
             for xx in range(x + 4, end, 9):
-                spawns.append((xx * 16, 10, 7 if b == 0x48 else 9))
+                if kind == 0:
+                    spawns.append(
+                        (xx * 16, max(2, depths[((xx - x) // 9) % 8] // 16 - 1), 4)
+                    )
+                else:
+                    spawns.append((xx * 16, 10, 7 if b == 0x48 else 9))
         elif y < 12 and b >> 4 == 1 and data[1] >> 6 == 2:
             spawns.append((x * 16, y, 9))  # cannon mouth
 
@@ -235,6 +267,8 @@ def area(name, kind):
                 style = (
                     4 if kind == 0 else int(b in (0, 1, 2, 3, 0x0E, 0x0F) or b >= 0x3B)
                 )
+                if kind == 0 and b == 7:
+                    style = 14  # Blooper
                 if b == 5:
                     style = 10
                 spawns.append(
@@ -269,6 +303,48 @@ def pixels(chrdata, tile):
     ]
 
 
+def compile_palettes(colors):
+    # Only source hues actually used by the SMB background palettes. Index
+    # zero of each NES subpalette means the common VDP backdrop.
+    tms = {
+        0x0F: 1,
+        0x00: 1,
+        0x10: 14,
+        0x12: 4,
+        0x15: 13,
+        0x16: 8,
+        0x17: 6,
+        0x1A: 12,
+        0x1C: 4,
+        0x21: 5,
+        0x25: 9,
+        0x27: 11,
+        0x29: 3,
+        0x30: 15,
+        0x36: 9,
+        0x3A: 3,
+        0x3C: 7,
+        0x09: 2,
+    }
+    reset = (ROOT / "src/reset.s").read_text()
+
+    def inks(theme):
+        data = table(theme + "PaletteData", reset)[3:19]
+        return [tms[v] for i, v in enumerate(data) if i % 4]
+
+    themes = [inks(t) for t in ("Water", "Ground", "Underground", "Castle")]
+    themes += [inks(t)[:3] + themes[1][3:] for t in ("DaySnow", "Mushroom")]
+    (OUT / "themes.bin").write_bytes(
+        bytes(v for row in themes for v in (0, *row, 15, 6, 11))
+    )
+    rows = {}
+    ids = []
+    for i in range(0, len(colors), 8):
+        ids.append(rows.setdefault(bytes(colors[i : i + 8]), len(rows)))
+    (OUT / "color_rows.bin").write_bytes(b"".join(rows))
+    (OUT / "color_ids.bin").write_bytes(bytes(ids))
+
+
 def graphics():
     src = (ROOT / "src/screen_render.s").read_text()
     raw = (ROOT / "chr/mmc3/bg_ground.chr").read_bytes()
@@ -276,30 +352,30 @@ def graphics():
     cache = {}
 
     def convert(n, palette):
+        # Store logical NES inks, not a particular level's RGB colors. Rank
+        # by the NES pixel index so the pattern geometry survives a recolor.
         key = n, palette
         if key in cache:
             return cache[key]
         idx = len(patterns) // 8
         for row in pixels(raw, n):
-            s = [palette[v] for v in row]
-            ranked = sorted(set(s), key=lambda v: (-s.count(v), v))
-            # Preserve backdrop/outline even on a busy scanline.
-            bg = 0 if 0 in s else ranked[0]
-            fg = next((v for v in ranked if v != bg), bg)
-            if n in (0xAA, 0xAB, 0xBA, 0xBB, 0xAC, 0xAD, 0xBC, 0xBD) and bg == 0:
-                # A 9918 pattern row cannot carry NES transparency AND three
-                # inks. Use negative space for the coin's stamped inner rim.
-                fg = 11
+            counts = sorted(set(row), key=lambda v: (-row.count(v), v))
+            bg = 0 if 0 in row else counts[0]
+            fg = next((v for v in counts if v != bg), bg)
+            if n in (0xAA, 0xAB, 0xBA, 0xBB, 0xAC, 0xAD, 0xBC, 0xBD):
                 patterns.append(sum((v == 1) << (7 - i) for i, v in enumerate(row)))
-                colors.append(fg << 4)
+                colors.append(
+                    palette[1] << 4
+                    | (palette[2] if n in (0xAC, 0xAD, 0xBC, 0xBD) else 0)
+                )
                 continue
             patterns.append(
                 sum(
-                    (v == fg or (v != bg and (bg == 0 or v != 1))) << (7 - i)
-                    for i, v in enumerate(s)
+                    (v == fg or (v != bg and (bg == 0 or v != 3))) << (7 - i)
+                    for i, v in enumerate(row)
                 )
             )
-            colors.append(fg * 16 + bg)
+            colors.append(palette[fg] * 16 + palette[bg])
         if idx >= 37:
             for old in range(idx):
                 if (
@@ -314,10 +390,10 @@ def graphics():
         return idx
 
     for i in range(37):
-        convert(i, (0, 15, 15, 15))
+        convert(i, (0, 13, 13, 13))
     meta = bytearray(256 * 4)
     flags = bytearray(256)
-    palettes = [(0, 3, 12, 1), (0, 11, 6, 1), (0, 15, 14, 4), (0, 11, 6, 1)]
+    palettes = [(0, 1 + 3 * g, 2 + 3 * g, 3 + 3 * g) for g in range(4)]
     for line in src.splitlines():
         m = re.match(r"MTILE_CURRENT_INDEX .set \$(\w+)", line)
         if m:
@@ -327,25 +403,17 @@ def graphics():
             continue
         tiles = [int(v, 16) for v in re.findall(r"\$(\w\w)", m[1])[:4]]
         palette = palettes[idx >> 6]
-        if idx in (0xC2, 0xC3):
-            palette = (0, 11, 10, 1)
-        if idx == 0x52:
-            palette = (0, 7, 4, 1)
-        if idx in (0x86, 0x87):
-            palette = (0, 15, 4, 7)
-        if idx == 0x89:
-            palette = (0, 11, 6, 1)  # bridge timbers, not castle masonry
-        if idx == 0x62:
-            palette = (0, 15, 14, 1)
         for i, j in enumerate([0, 2, 1, 3]):
-            meta[i * 256 + idx] = convert(tiles[j], palette)
-        if idx == 0x52:
-            for i, j in enumerate([0, 2, 1, 3]):
-                meta[i * 256 + 0x8C] = convert(tiles[j], (0, 15, 14, 1))
-            flags[0x8C] = 1
-        if idx in (0x86, 0x87):
-            for i, j in enumerate([0, 2, 1, 3]):
-                meta[i * 256 + idx + 4] = convert(tiles[j], (0, 11, 8, 6))
+            tile = convert(tiles[j], palette)
+            meta[i * 256 + idx] = tile
+            if idx == 0x52:
+                meta[i * 256 + 0x8C] = tile
+                flags[0x8C] = 1
+            if idx in (0x86, 0x87):
+                meta[i * 256 + idx + 4] = tile
+        if idx == 0x86:
+            for i in range(4):
+                meta[i * 256 + 0x8D] = meta[(i % 2) * 256 + idx]
         flags[idx] = int("MTILE_SOLID" in line and idx not in (0xC2, 0xC3, 0x24, 0x25))
         idx += 1
     # Add HUD punctuation without consuming another metatile palette group.
@@ -363,12 +431,12 @@ def graphics():
             tile = data[i if cmd & 64 else i + j]
             row, col = divmod(address - 0x2000, 32)
             if 4 <= row <= 14 and 5 <= col <= 26:
-                logo[(row - 4) * 22 + col - 5] = convert(tile, (0, 11, 6, 1))
+                logo[(row - 4) * 22 + col - 5] = convert(tile, (0, 15, 14, 12))
             address += 32 if cmd & 128 else 1
         i += 1 if cmd & 64 else count
     for rows, col in [
-        ([0, 0, 0, 126, 0, 0, 0, 0], 0xF0),
-        ([24, 60, 118, 118, 118, 118, 60, 24], 0xB0),
+        ([0, 0, 0, 126, 0, 0, 0, 0], 0xD0),
+        ([24, 60, 118, 118, 118, 118, 60, 24], 0xA0),
     ]:
         patterns.extend(rows)
         colors.extend([col] * 8)
@@ -383,12 +451,9 @@ def graphics():
         }
     )
     first, last = pulse_ids[0], pulse_ids[-1] + 1
-    pulse = bytearray()
-    for gold in (11, 10, 11, 10):
-        for byte in colors[first * 8 : last * 8]:
-            inks = [(gold if ink == 11 else ink) for ink in divmod(byte, 16)]
-            pulse.append(inks[0] * 16 + inks[1])
-    (OUT / "pulse.bin").write_bytes(pulse)
+    (OUT / "pulse.bin").write_bytes(colors[first * 8 : last * 8])
+    assert (last - first) * 8 <= 96
+    compile_palettes(colors)
     with (OUT / "glyphs.inc").open("a") as out:
         out.write(
             f"PULSE_OFFSET equ {first * 8}\nPULSE_BYTES equ {(last - first) * 8}\n"
@@ -470,6 +535,17 @@ def graphics():
         for mask in [(1, 3), (2,)]:
             sprite(sprites, raw, pose, False, mask)
     (OUT / "outdoor.bin").write_bytes(sprites)
+    sprites = bytearray()
+    for pose in (0x1A, 0x3A, 0x18):
+        half = water[1024 + pose * 16 : 1024 + (pose + 2) * 16]
+        pair(
+            half + bytes(int(f"{b:08b}"[::-1], 2) for b in half),
+            range(4),
+            ((1, 2), (3,)),
+        )
+    pair(water, [0x2A, 0x2B, 0x2E, 0x2F])
+    assert len(sprites) == 256
+    (OUT / "swim.bin").write_bytes(sprites)
 
 
 def mario_frames(banks):
@@ -669,6 +745,7 @@ def compile_game():
     # NES backdrop $0f is black, $22 is sky blue; bonus rooms override it.
     backgrounds = table("BackgroundColors", (ROOT / "src/screen_render.s").read_text())
     skies = []
+    themes = []
     for name in stages:
         kind = next(
             i
@@ -682,11 +759,17 @@ def compile_game():
         for x, row, cmd in objects(level[2:]):
             if x < 16 and row == 14 and cmd & 64 and cmd & 7 >= 4:
                 control = cmd & 7
-        skies.append(
-            1
-            if backgrounds[control if control >= 4 else kind] == 15
-            else (4 if kind == 0 else 5)
+        themes.append(
+            5
+            if level[1] >> 6 == 1
+            else 4
+            if control in (5, 6)
+            else 3
+            if control == 7
+            else kind
         )
+        skies.append(1 if backgrounds[control if control >= 4 else kind] == 15 else 5)
+    asm += ["stage_theme: db " + ",".join(map(str, themes))]
     asm += ["stage_sky: db " + ",".join(map(str, skies))]
     asm += ["stage_list: dw " + ",".join(stages)]
     asm += ["pipe_list: dw " + ",".join(f"pipes_stage{i}" for i in range(32))]

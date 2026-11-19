@@ -66,6 +66,7 @@ animcount byte
 yview   byte
 tall    byte
 morph   byte
+theme   byte                    ; last uploaded theme + 1
 duck    byte
 satpage byte                    ; 0 or 4: SAT at $1b00 or $1f00
 posetab byte                    ; 0 or 104: active pose pattern base
@@ -113,9 +114,6 @@ boot:   ld sp,$c400
         ld hl,0
         ld de,patterns
         call three_banks
-        ld hl,$2000
-        ld de,colors
-        call three_banks
         ld hl,$3800
         call address
         ld hl,sprites
@@ -131,7 +129,7 @@ three_banks:
         push de
         call address
         ex de,hl
-        ld de,colors-patterns
+        ld de,patterns_end-patterns
         call transfer
         pop de
         pop hl
@@ -193,6 +191,8 @@ title:  call silence
         ld a,6
         ld (s+State.back),a
         call load_stage
+        xor a
+        ld (playing),a          ; start the lead-in on Start, not on the title
         call redraw
         call hud
         ld hl,$1865
@@ -394,6 +394,17 @@ load_area:
         out (CTRL),a
         ld a,$87
         out (CTRL),a
+        ld a,(s+State.bonus)
+        or a
+        ld a,2
+        jr nz,.palette
+        ld a,(s+State.stage)
+        ld e,a
+        ld d,0
+        ld hl,stage_theme
+        add hl,de
+        ld a,(hl)
+.palette:call set_theme
         xor a
         ld hl,(s+State.entry)
         ld (s+State.scroll),hl
@@ -451,7 +462,11 @@ load_area:
         call address
         ld hl,outdoor_patterns
         ld a,(s+State.kind)
-        cp 3
+        or a
+        jr nz,.land_art
+        ld hl,swim_patterns
+        jr .upload
+.land_art:cp 3
         jr nz,.upload
         ld hl,sprites+184*8
 .upload:ld de,256
@@ -811,13 +826,20 @@ clear_text: db '   COURSE CLEAR    ',0
 win_text: db ' PEACH IS RESCUED  ',0
 
         include "music.asm"
+        include "themes.asm"
+        align 16
+palette_inks: incbin "../build/sg1000/themes.bin"
+color_rows: incbin "../build/sg1000/color_rows.bin"
+color_ids: incbin "../build/sg1000/color_ids.bin"
+color_ids_end:
 pulse_colors: incbin "../build/sg1000/pulse.bin"
 logo:   incbin "../build/sg1000/title.bin"
 patterns: incbin "../build/sg1000/patterns.bin"
-colors:   incbin "../build/sg1000/colors.bin"
+patterns_end:
 sprites:  incbin "../build/sg1000/sprites.bin"
 sprites_end:
 outdoor_patterns: incbin "../build/sg1000/outdoor.bin"
+swim_patterns: incbin "../build/sg1000/swim.bin"
 mario_data: incbin "../build/sg1000/mario.bin"
         include "../build/sg1000/poses.inc"
         include "../build/sg1000/glyphs.inc"

@@ -29,7 +29,11 @@ def compile_music(root, out):
             blob.extend(int(v, 16) for v in re.findall(r"\$(\w+)", line))
     ground = re.findall(
         r"(GroundLevel\w+Hdr)-MHD",
-        src.split(";ground level music layout")[1].split(";music headers")[0],
+        src[
+            src.rindex("\n", 0, src.index(";ground level music layout")) : src.index(
+                ";music headers"
+            )
+        ],
     )
     songs = [
         ["WaterMusHdr"],
@@ -49,7 +53,10 @@ def compile_music(root, out):
     lens = blob[labels["MusicLengthLookupTbl"] :]
     for i, song in enumerate(songs):
         asm += [
-            f"song{i}: dw " + ",".join(song) + ",0," + (f"song{i}" if i < 5 else "0")
+            f"song{i}: dw "
+            + ",".join(song)
+            + ",0,"
+            + ("song1+2" if i == 1 else f"song{i}" if i < 5 else "0")
         ]
     for hdr in sorted({hdr for song in songs for hdr in song}):
         tempo, base, offset = headers[hdr]

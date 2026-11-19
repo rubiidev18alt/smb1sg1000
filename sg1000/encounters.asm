@@ -205,6 +205,34 @@ special_art: db 168,8, 200,8, 192,1, 208,12, 184,12, 240,8, 128,8
 ; source X rather than drifting toward Mario with the flying-enemy path.
 bubble_y: db 190,176,163,150,139,128,118,109,101,94,87,82,77,74,71,70,69
 special_actor:
+        cp 14
+        jr nz,.not_squid
+        ; Contract and jet toward the swimmer, then sink between strokes.
+        inc (ix+Actor.dir)
+        ld a,(ix+Actor.dir)
+        and 63
+        cp 24
+        jr nc,.sink
+        ld a,(ix+Actor.y)
+        cp 44
+        jr c,.aim
+        dec (ix+Actor.y)
+.aim:   ld a,(s+State.px)
+        cp (ix+Actor.x)
+        jr z,.swimmer
+        jr c,.left
+        inc (ix+Actor.x)
+        jr .swimmer
+.left:  dec (ix+Actor.x)
+        jr .swimmer
+.sink:  and 1
+        jr nz,.swimmer
+        ld a,(ix+Actor.y)
+        cp 160
+        jr nc,.swimmer
+        inc (ix+Actor.y)
+.swimmer:jp walker.touch
+.not_squid:
         cp 13
         jr nz,.other
         inc (ix+Actor.dir)

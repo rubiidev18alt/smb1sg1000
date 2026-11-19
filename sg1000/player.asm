@@ -283,6 +283,15 @@ move_y: ld a,(s+State.edge)
         ld a,d
         add a,15
 .probe: ld e,a
+        bit 7,c
+        jr z,.walls
+        ld a,(s+State.kind)
+        or a
+        jr nz,.walls
+        ld a,e
+        cp 24                   ; keep Mario beneath the visible waterline
+        jp c,.stop
+.walls:
         ld a,(s+State.px)
         add a,2
         ld d,a
@@ -387,9 +396,14 @@ collect:ld a,(s+State.above)
         jp z,died
         cp $8b
         jp z,died
-        cp $c2
+        cp $c3
+        jr nz,.dry_coin
+        ld (hl),$87             ; replace the coin with water, not sky
+        jr .taken
+.dry_coin:cp $c2
         ret nz
         ld (hl),0
+.taken:
         call mark
 earn_coin:
         push hl

@@ -188,6 +188,9 @@ walker: ld a,(ix+Actor.active)
         call points
         jr .remove
 .vulnerable:
+        ld a,(s+State.kind)
+        or a
+        jp z,.hurt              ; underwater enemies cannot be stomped
         ld a,(ix+Actor.style)
         cp 8
         jp z,.hurt
