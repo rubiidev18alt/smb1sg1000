@@ -10,9 +10,13 @@
 | Button 1 | Jump; release early for a short hop. Tap to swim underwater. |
 | Button 2 | Hold to run; press to shoot as Fire Mario. |
 | Down | Enter a connected pipe while standing on its mouth. |
-| Either button | Start or continue after a life loss or course clear. |
+| Button 1 on the title | Start the selected course. |
+| Button 2 on the title | Advance one level: 1–5, then the next world. After 8-5 it wraps to 1-1. Slot 5 plays a bonus room. |
+| Either button after a life loss or clear | Continue. |
 
-This is a native Z80 adaptation of the **32-stage, eight-world main route**. The build reads SMB1Base’s area streams, halfway points, CHR graphics, title sign and music data. The port includes underground coin rooms, mushrooms and fire flowers, shell kicks, flagpoles, castle hazards and Bowser. It is single-player and not frame-identical to the NES game: the camera advances one metatile at a time, lifts are fixed platforms, enemy patterns and boss fights are simplified, and warp zones, vine/cloud routes and castle loops are omitted.
+The cartridge follows the **32-stage, eight-world main route** using SMB1Base’s area streams, halfway points and CHR art. Mario accelerates and brakes with fractional velocity; speed and button hold affect the jump arc. In 1-3 the girders move and carry Mario. In 1-2 you can ride an elevator above the ceiling, run over the exit and drop down to the warp pipes. The Starman bounces out of its brick and grants temporary contact invincibility.
+
+The camera now steps by **8 pixels rather than 16**. It is not pixel-smooth or frame-identical to the NES. The SG-1000 video chip has no scroll registers, permits two background colors per eight-pixel scanline, and displays only four sprites per scanline. Mario uses streamed standing, walking, skidding, jumping, swimming, crouching, throwing, climbing, transformation and death poses. The new HUD, coin colors, layered Koopas and descending flag are adapted for those limits. This revision is **silent** rather than playing incomplete music arrangements. Enemy behavior and boss fights are simplified; vine/cloud routes and castle loops are not implemented.
 
 ### Rebuild
 
@@ -24,9 +28,9 @@ make sg1000         # writes build/smb1.sg
 make sg1000-test    # verify the assembled ROM against the source area tables
 ```
 
-For a controller-driven emulator test, run `make sg1000-test GEARSYSTEM_CORE=/path/to/gearsystem_libretro.so`. It plays 1-1 both overland and through the bonus pipe, enters 1-2, then tests life loss, game over and restart. Tested in Gearsystem; not verified on a physical console.
+For a controller-driven emulator test, run `make sg1000-test GEARSYSTEM_CORE=/path/to/gearsystem_libretro.so`. The recorded pad inputs clear 1-1 both overland (collecting Starman) and through the bonus pipe, take the 1-2 roof to world 2, and clear 1-3 using moving lifts. The suite also checks title selection, wraparound, life loss and restart. Tested in Gearsystem; not verified on a physical console.
 
-The native code is in [`sg1000/`](sg1000/). It uses 1 KiB of work RAM and the 9918A's 16 KiB of VRAM. Only sixteen columns of the map are mutable at once; the rest stream from cartridge ROM. Backgrounds use two alternating Graphics II name tables, sprites use layered 16×16 patterns, and two PSG voices play the converted melody and bass while the third handles effects.
+The native code is in [`sg1000/`](sg1000/). It uses 1 KiB of work RAM and 16 KiB of VRAM. Sixteen mutable columns stream from cartridge ROM. Backgrounds are composed in a hidden Graphics II name table and flipped at vertical blank; the current Mario pose is uploaded only when it changes.
 
 ---
 

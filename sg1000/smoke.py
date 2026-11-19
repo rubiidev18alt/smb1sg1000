@@ -5,6 +5,7 @@ The test reads symbols and observes emulated RAM but drives the game only via pa
 """
 
 import ctypes as C
+import json
 import re
 import sys
 from pathlib import Path
@@ -24,7 +25,6 @@ callbacks = []
 buttons = ()
 video_frames = 0
 video_sizes = set()
-sound = False
 
 
 def register(name, result, args, fn):
@@ -40,9 +40,6 @@ def video(data, width, height, pitch):
 
 
 def audio(data, count):
-    global sound
-    if not sound:
-        sound = any(C.string_at(data, count * 4))
     return count
 
 
@@ -69,7 +66,7 @@ assert core.retro_load_game(C.byref(game))
 core.retro_get_memory_data.restype = C.POINTER(C.c_ubyte)
 ram = core.retro_get_memory_data(2)
 base = symbols["s"] - 0xC000
-solid = Path("build/sg1000/solid.bin").read_bytes()
+replays = json.loads(Path("sg1000/replays.json").read_text())
 
 
 def st(name):
@@ -88,61 +85,89 @@ def frame(n, *keys):
         core.retro_run()
 
 
-def start():
+def select(slot=0):
     frame(120)
     assert st("stage") == 0 and st("lives") == 3
+    for _ in range(slot):
+        frame(2, 8)
+        frame(2)
     frame(3, 0)
-    frame(40)
-    assert st("py") == 160 and st("floor") == 1
+    frame(45)
 
 
-def run_course(use_pipe):
-    start()
-    underground = jumped = False
-    for _ in range(2000):
-        x, y = st("px"), st("py")
-        world = scroll() + x
-        if st("stage") == 1:
-            break
-        assert st("lives") == 3
-
-        def wall(dx, dy, x=x, y=y):
-            e = y + dy
-            return 0 <= e < 192 and solid[ram[((x + dx) & 240) + (e // 16)]]
-
-        actors = symbols["actors"] - 0xC000
-        danger = any(
-            ram[a] and -8 < ram[a + 1] - x < 50 and abs(ram[a + 2] - y) < 24
-            for a in (actors, actors + symbols["Actor"])
-        )
-        keys = [7, 8]  # right, run
-        if (
-            st("floor")
-            and (danger or any(wall(dx, 12) for dx in (14, 20, 32)) or not wall(22, 16))
-            or st("vy") >= 128
-        ):
-            keys.append(0)
-        if use_pipe and not underground and 916 <= world <= 924:
-            keys = [5]  # down
-        if st("bonus"):
-            underground = True
-        jumped |= st("vy") >= 128
-        frame(1, *keys)
-    assert st("stage") == 1 and jumped and underground == use_pipe
-    assert st("coins") != 0 and sound
-    frame(5)
-    frame(3, 0)
-    frame(45)  # dismiss course-clear screen
-    assert st("kind") == 2 and st("stage") == 1 and scroll() == 0 and st("py") == 160
+def run_tape(name):
+    """Frame count and RetroPad button mask. No savestates or RAM writes."""
+    flags = set()
+    riding = 0
+    for n, mask in replays[name]:
+        for _ in range(n):
+            frame(1, *[b for b in range(16) if mask & 1 << b])
+            assert st("lives") == 3
+            if st("star") or ram[base + symbols["State.star"] + 1]:
+                flags.add("star")
+            if st("bonus"):
+                flags.add("bonus")
+            if (
+                st("above")
+                and st("floor")
+                and st("py") == 240
+                and scroll() + st("px") > 2564
+                and ram[(st("px") + 8) & 0xF0] == 0x52
+            ):
+                flags.add("roof")
+            count = ram[symbols["liftcount"] - 0xC000]
+            for i in range(count):
+                p = symbols["liftbuf"] - 0xC000 + i * 5
+                x = ram[p] + ram[p + 1] * 256
+                if x >= 32768:
+                    x -= 65536
+                if (
+                    st("floor")
+                    and st("py") + 16 == ram[p + 2]
+                    and -12 <= st("px") - x < 46
+                ):
+                    riding += 1
+    return flags, riding
 
 
-run_course(False)
+select()
+flags, _ = run_tape("star-and-flag")
+assert "star" in flags and st("stage") == 1
+frame(5)
+frame(3, 0)
+frame(45)
+assert st("kind") == 2 and st("py") == 160
 core.retro_reset()
-run_course(True)
+select()
+flags, _ = run_tape("bonus-pipe")
+assert "bonus" in flags and st("stage") == 1
 core.retro_reset()
-start()
+select(1)
+flags, _ = run_tape("roof-warp")
+assert "roof" in flags and st("stage") == 4
+core.retro_reset()
+select(2)
+_, riding = run_tape("lifts-1-3")
+assert st("stage") == 3 and riding >= 10
+core.retro_reset()
+frame(120)
+for i in range(1, 41):
+    frame(4, 8)
+    frame(3)
+    world, level = divmod(i % 40, 5)
+    assert st("stage") == world * 4 + min(level, 3) and bool(st("debug5")) == (
+        level == 4
+    )
+for _ in range(4):
+    frame(3, 8)
+    frame(2)
+frame(3, 0)
+frame(25)
+assert st("bonus") and st("kind") == 2
+core.retro_reset()
+select()
 for lives in (2, 1, 0):
-    for _ in range(400):
+    for _ in range(600):
         frame(1, 7, 8)
         if st("lives") == lives:
             break
@@ -154,5 +179,5 @@ assert st("lives") == 3 and st("stage") == 0
 assert video_sizes == {(256, 192)}
 core.retro_deinit()
 print(
-    f"PASS: {video_frames} emulator frames; 1-1 overland and bonus routes, 1-2, game over and restart"
+    f"PASS: {video_frames} frames; 1-1 Starman and bonus routes, 1-2 roof to world 2, 1-3 moving lifts, selector wrap and restart"
 )

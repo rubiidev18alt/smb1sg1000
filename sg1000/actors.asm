@@ -59,6 +59,9 @@ walker: ld a,(ix+Actor.active)
         jr nz,.enemy
         ld a,(ix+Actor.style)
         or a
+        cp 3
+        jr z,.star_move
+        or a
         jr nz,.fall
         jr .normal
 .enemy: ld a,(ix+Actor.style)
@@ -111,7 +114,35 @@ walker: ld a,(ix+Actor.active)
         cp 191
         jp nc,.remove
         djnz .drop
-.touch: ld a,(s+State.px)
+.star_move:
+        ld a,(ix+Actor.dir)
+        add a,(ix+Actor.x)
+        ld (ix+Actor.x),a
+        ld a,(s+State.tick)
+        and 3
+        jr nz,.bounce
+        ld hl,s+State.starvel
+        ld a,(hl)
+        cp 4
+        jr z,.bounce
+        inc (hl)
+.bounce:ld a,(s+State.starvel)
+        add a,(ix+Actor.y)
+        ld b,a
+        ld d,(ix+Actor.x)
+        add a,15
+        ld e,a
+        call solid_at
+        jr z,.rise
+        ld a,-4
+        ld (s+State.starvel),a
+        jr .touch
+.rise:  ld (ix+Actor.y),b
+        jr .touch
+.touch: ld a,(s+State.above)
+        or a
+        ret nz
+        ld a,(s+State.px)
         sub (ix+Actor.x)
         add a,12
         cp 25
@@ -134,11 +165,19 @@ walker: ld a,(ix+Actor.active)
         or a
         sbc hl,de
         jr z,.grow
+        ld hl,(s+State.star)
+        ld a,h
+        or l
+        jr z,.vulnerable
+        ld a,2
+        call points
+        jr .remove
+.vulnerable:
         ld a,(ix+Actor.style)
         cp 8
-        jr z,.hurt
+        jp z,.hurt
         cp 12
-        jr z,.hurt
+        jp z,.hurt
         cp 2
         jr z,.kick
         ld a,(s+State.vy)
@@ -151,8 +190,6 @@ walker: ld a,(ix+Actor.active)
         ld (s+State.vy),a
         ld a,1
         call points
-        ld a,$8a
-        call effect
         ld a,(ix+Actor.style)
         cp 1
         jr z,.shell
@@ -177,20 +214,30 @@ walker: ld a,(ix+Actor.active)
         ret
 .remove:ld (ix+Actor.active),0
         ret
-.grow:  ld a,(s+State.big)
+.grow:  ld a,(ix+Actor.style)
+        cp 3
+        jr nz,.size
+        ld hl,600
+        ld (s+State.star),hl
+        jr .remove
+.size:  ld a,(s+State.big)
         cp 2
         jr z,.grown
         inc a
 .grown:
         ld (s+State.big),a
+        ld a,24
+        ld (s+State.morph),a
         ld a,$10
         call points
         call player_gfx
-        ld a,$83
-        call effect
         jr .remove
 .hurt:
-hurt_player: ld a,(s+State.immune)
+hurt_player: ld hl,(s+State.star)
+        ld a,h
+        or l
+        ret nz
+        ld a,(s+State.immune)
         or a
         ret nz
         ld a,(s+State.big)

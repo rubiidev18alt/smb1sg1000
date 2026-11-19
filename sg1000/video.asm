@@ -3,7 +3,9 @@
 present_map:
         call redraw
         call hud
-        call vblank
+        ld a,1
+        ld (s+State.ready),a
+        ret
 flip:   ld a,(s+State.back)
         out (CTRL),a
         ld a,$82
@@ -13,24 +15,62 @@ flip:   ld a,(s+State.back)
         ld (s+State.back),a
         xor a
         ld (s+State.dirty),a
+        ld (s+State.ready),a
         ret
 redraw: ld hl,$1800
         call back_address
-        ld c,0
-.row:   ld d,map/256
-        ld e,c
+        ld a,(s+State.yview)    ; pixel offset, always a multiple of 8
+        rrca
+        rrca
+        rrca
+        ld c,a
+        or a
+        jr z,.world
+.clear_row:ld b,32
+        ld a,36
+.clear: out (VDP),a
+        nop
+        nop
+        djnz .clear
+        dec c
+        jr nz,.clear_row
+.world: ld ixl,0
+        ld a,(s+State.yview)
+        rrca
+        rrca
+        rrca
+        neg
+        add a,24
+        ld ixh,a
+.row:   ld a,ixl
+        srl a
+        ld c,a
+        ld e,a
+        ld d,map/256
         ld h,metatiles/256
-        call half_row
-        ld e,c
-        ld h,metatiles/256+2
-        call half_row
-        inc c
-        ld a,c
-        cp 12
+        jr nc,.half
+        inc h
+        inc h
+.half:  call half_row
+        inc ixl
+        dec ixh
         jr nz,.row
         ret
 half_row:
         ld b,16
+        ld a,(s+State.phase)
+        or a
+        jr z,.tile
+        ld a,(de)
+        ld l,a
+        inc h
+        ld a,(hl)
+        out (VDP),a
+        dec h
+        ld a,e
+        add a,16
+        ld e,a
+        dec b
 .tile:  ld a,(de)
         ld l,a
         ld a,(hl)
@@ -45,6 +85,22 @@ half_row:
         add a,16
         ld e,a
         djnz .tile
+        ld a,(s+State.phase)
+        or a
+        ret z
+        push hl
+        ld hl,(s+State.nextcol)
+        ld e,(hl)
+        inc hl
+        ld d,(hl)
+        ex de,hl
+        add hl,bc               ; B=0, C=row
+        ld a,(hl)
+        pop hl
+        ld d,map/256            ; the bottom half-row reuses the map page
+        ld l,a
+        ld a,(hl)
+        out (VDP),a
         ret
 back_address:
         ld a,(s+State.back)
@@ -70,58 +126,88 @@ text:   call back_address
 .alpha: sub 'A'-10
 .emit:  out (VDP),a
         jr .char
-hud:    ld hl,$1801
-        ld de,hud_world
-        call text
-        ld a,(s+State.stage)
-        rrca
-        rrca
-        and 7
-        inc a
-        out (VDP),a
+hud:    ld hl,$1800
+        call back_address
+        ld b,64
         ld a,36
+.clear: out (VDP),a
         nop
         nop
-        nop
-        out (VDP),a
-        ld a,(s+State.stage)
-        and 3
-        inc a
-        out (VDP),a
-        ld hl,$180d
-        ld de,hud_coins
-        call text
-        ld a,(s+State.coins)
-        rrca
-        rrca
-        rrca
-        rrca
-        and 15
-        out (VDP),a
-        ld a,(s+State.coins)
-        and 15
-        out (VDP),a
-        ld hl,$1818
-        ld de,hud_lives
-        call text
-        ld a,(s+State.lives)
-        out (VDP),a
-        ld hl,$1821
+        djnz .clear
+        ld hl,$1802
         ld de,hud_score
         call text
+        ld hl,$1812
+        ld de,hud_world
+        call text
+        ld hl,$181a
+        ld de,hud_time
+        call text
+        ld hl,$1822
+        call back_address
         ld a,(s+State.scorehi)
         call digits
         ld a,(s+State.scorelo)
         call digits
         xor a
         call digits
-        ld hl,$1836
-        ld de,hud_time
-        call text
+        ld hl,$182b
+        call back_address
+        ld a,HUD_COIN
+        out (VDP),a
+        ld a,33                 ; X
+        nop
+        nop
+        nop
+        out (VDP),a
+        ld a,(s+State.coins)
+        call digits
+        ld hl,$1833
+        call back_address
+        call stage_digits
+        ld hl,$183b
+        call back_address
         ld a,(s+State.hundred)
         out (VDP),a
         ld a,(s+State.timer)
         jp digits
+selector_label:
+        ld hl,$1a46             ; write only selector text on the visible page
+        ld a,(s+State.back)
+        xor 1
+        ld (s+State.back),a
+        ld de,select_prompt
+        call text
+        call stage_digits
+        ld hl,$1833
+        call back_address
+        call stage_digits
+        ld a,(s+State.back)
+        xor 1
+        ld (s+State.back),a
+        ret
+select_prompt: db 'BUTTON 2  WORLD ',0
+stage_digits:
+        ld a,(s+State.stage)
+        rrca
+        rrca
+        and 7
+        inc a
+        out (VDP),a
+        ld a,DASH
+        nop
+        nop
+        nop
+        out (VDP),a
+        ld a,(s+State.debug5)
+        or a
+        ld a,5
+        jr nz,.write
+        ld a,(s+State.stage)
+        and 3
+        inc a
+.write: out (VDP),a
+        ret
 ; Source is one packed BCD byte.
 digits: ld b,a
         rrca
@@ -164,46 +250,32 @@ clock:  ld hl,s+State.divider
         jp mark
 
 draw_sprites:
+        call animate_mario
         ld hl,sat
         ld a,(s+State.immune)
         and 4
         jr nz,.others
-        ld a,(s+State.face)
-        ld b,a
-        ld a,(s+State.vy)
-        or a
-        jr z,.walk
-        ld a,24
-        jr .frame
-.walk:  ld a,(s+State.speed)
-        or a
-        jr z,.frame
-        ld a,(s+State.tick)
-        and 4
-        jr z,.frame
-        ld a,12
-.frame: add a,b
-        ld c,a
         ld a,(s+State.px)
         ld d,a
         ld a,(s+State.py)
-        dec a                   ; 9918 sprite Y is one scanline early
+        dec a
         ld e,a
-        ld a,(s+State.big)
+        ld c,12                 ; bottom is uploaded to patterns 12..23
+        ld a,(s+State.tall)
         or a
         jr z,.player
         ld a,e
         sub 16
         ld e,a
+        ld c,0
         call player_layers
         ld a,e
         add a,16
         ld e,a
-        ld a,c
-        add a,64                ; previous call advanced pattern by 8
-        ld c,a
+        ld c,12
 .player:call player_layers
-.others:ld ix,actors
+.others:call lift_sprites
+        ld ix,actors
         call enemy_sprite
         ld ix,actors+Actor
         call enemy_sprite
@@ -218,6 +290,9 @@ draw_sprites:
         ld c,232
         ld a,(item+Actor.style)
         or a
+        jr z,.mushroom
+        cp 3
+        ld c,88
         jr z,.mushroom
         ld c,176
 .mushroom:ld b,8
@@ -255,7 +330,17 @@ player_layers:
         cp 2
         jr nz,.cap
         ld b,15
-.cap:
+.cap:   ld a,(s+State.star)
+        ld iyl,a
+        ld a,(s+State.star+1)
+        or iyl
+        jr z,.skin
+        ld a,(s+State.tick)
+        rrca
+        and 7
+        add a,7
+        ld b,a
+.skin:
         call layer
         inc c
         inc c
@@ -268,9 +353,29 @@ player_layers:
         inc c
         inc c
         ld b,1
-layer:  ld (hl),e
+layer:  ld a,(s+State.yview)
+        add a,e
+        cp $d0                  ; reserved SAT terminator, hide clipped layers
+        ret z
+        ld (hl),a
         inc hl
-        ld (hl),d
+        ld a,(s+State.phase)
+        or a
+        ld a,d
+        jr z,.x
+        sub 8
+        jr nc,.x
+        add a,32
+        ld (hl),a
+        inc hl
+        ld (hl),c
+        inc hl
+        ld a,b
+        or $80
+        ld (hl),a
+        inc hl
+        ret
+.x:     ld (hl),a
         inc hl
         ld (hl),c
         inc hl
@@ -313,8 +418,7 @@ enemy_sprite:
         ld c,160
         jr nc,.pair
         or a
-        ld c,144
-        jr nz,.anim
+        jp nz,koopa_sprite
         ld c,216
         ld b,6
 .anim:  ld a,(s+State.tick)
@@ -351,8 +455,66 @@ pennant:
         ret c
         ld d,a
         ld a,(s+State.flag_y)
-        add a,17
+        add a,32
         ld e,a
         ld b,15
         ld c,244
+        call layer
+        ld b,12
+        ld c,248
         jp layer
+
+; All four NES Koopa 8x16 pieces, including the head above its hitbox.
+koopa_sprite:
+        ld c,24
+        bit 7,(ix+Actor.dir)
+        jr z,.frame
+        ld c,56
+.frame: ld a,(s+State.tick)
+        and 8
+        add a,c
+        ld c,a
+        ld a,e
+        sub 16
+        ld e,a
+        call .half
+        ld a,c
+        add a,12
+        ld c,a
+        ld a,e
+        add a,16
+        ld e,a
+.half:  ld b,12
+        call layer
+        ld a,c
+        add a,4
+        ld c,a
+        ld b,11
+        jp layer
+
+; Pulse coin and question-block inks, one of the three VRAM banks on each
+; successive frame. No tilemap redraw and no writes to the music hardware.
+pulse_tiles:
+        ld a,(s+State.tick)
+        and 7
+        cp 3
+        ret nc
+        add a,a
+        add a,a
+        add a,a
+        add a,$20+PULSE_OFFSET/256
+        ld h,a
+        ld l,PULSE_OFFSET%256
+        call address
+        ld a,(s+State.tick)
+        rrca
+        rrca
+        rrca
+        and 3
+        ld hl,pulse_colors
+        ld de,PULSE_BYTES
+        jr z,.upload
+        ld b,a
+.phase: add hl,de
+        djnz .phase
+.upload:jp transfer

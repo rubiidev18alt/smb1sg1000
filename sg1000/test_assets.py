@@ -10,16 +10,17 @@ class CartridgeTest(unittest.TestCase):
         cols, goal, enemies = area("GroundArea6", 1)
         self.assertEqual((cols[16][7], cols[21][7]), (0xC0, 0xC1))
         self.assertEqual(cols[28][9:12], [0x12, 0x14, 0x54])
+        self.assertEqual(cols[101][7], 0x57)  # Starman brick
         self.assertEqual(cols[69][11], 0)  # first pit
         self.assertIn((22, 10, 0), enemies)
-        self.assertEqual((goal, cols[goal][0]), (198, 0x24))
+        self.assertEqual((goal, cols[goal][1]), (198, 0x24))
         self.assertIn((57, 0, 163, 9), bonus_routes("GroundArea6", 0x25, 0))
 
     def test_page_controls_and_links(self):
         links = []
         commands = list(objects([0x0F, 3, 0x1E, 0xC2, 2, 0x6B, 6, 0xFF], True, links))
-        self.assertEqual(links, [(65, 0x42, 2)])
-        self.assertEqual(commands, [(70, 11, 6)])
+        self.assertEqual(links, [(49, 0x42, 2)])
+        self.assertEqual(commands, [(54, 11, 6)])
 
     def test_rom_tables(self):
         import re
@@ -53,6 +54,19 @@ class CartridgeTest(unittest.TestCase):
             cols, goal, _ = area(name, k)
             self.assertEqual((word(desc + 4), rom[desc + 6]), (goal * 16, k))
             addr = word(desc)
+            lift = word(desc + 7)
+            self.assertEqual(lift, addr + 2 * len(cols))
+            expected = [
+                (x * 16, max(0, min(11, y - 1)) * 16, b & 63)
+                for x, y, b in objects(table("E_" + name) + [255], True)
+                if 0x24 <= b & 63 <= 0x2C
+            ]
+            for x, y, style in expected:
+                self.assertEqual(
+                    (word(lift), rom[lift + 2], rom[lift + 3]), (x, y, style)
+                )
+                lift += 4
+            self.assertEqual(word(lift), 65535)
             for x, col in enumerate(cols):
                 p = word(addr + 2 * x)
                 self.assertEqual(rom[p : p + 12], bytes(col))

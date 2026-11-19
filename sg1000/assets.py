@@ -23,15 +23,18 @@ def table(name, source=SOURCE):
 
 def objects(data, enemy=False, links=None):
     page = i = 0
+    page_selected = False
     while data[i] != (255 if enemy else 253):
         a, b = data[i : i + 2]
         i += 2
         row = a & 15
-        if b & 128:
+        if b & 128 and not page_selected:
             page += 1
+        page_selected = False
         b &= 127
         if (enemy and row == 15) or (not enemy and row == 13 and b < 64):
             page = b & 31
+            page_selected = True
         elif enemy and row == 14:
             if links is not None:
                 links.append((page * 16 + (a >> 4), b, data[i]))
@@ -96,7 +99,7 @@ def area(name, kind):
                         0xC1,
                         0x55,
                         0x55,
-                        0x55,
+                        0x57,  # brick containing Starman
                         0x58,
                         0x55,
                         0x6B,
@@ -164,7 +167,11 @@ def area(name, kind):
         elif (y, b) == (13, 0x41) or (y == 15 and op == 5):
             goal = x
             for yy in range(11):
-                put(x, yy, 0x24 if yy == 0 else 0x61 if yy == 10 else 0x25)
+                put(
+                    x,
+                    yy,
+                    0 if yy == 0 else 0x24 if yy == 1 else 0x61 if yy == 10 else 0x25,
+                )
         elif y == 13 and b == 0x42:
             goal = x
             put(x, 6, 0xC5)
@@ -202,10 +209,7 @@ def area(name, kind):
 
     for x, y, b in objects(enemies, True):
         b &= 63
-        if 0x24 <= b <= 0x2C:  # stationary substitutes for lifts
-            for j in range(3):
-                put(x + j, max(2, min(10, y - 1)), 0x63)
-        elif 0x1B <= b <= 0x20:
+        if 0x1B <= b <= 0x20:
             spawns.append((x, max(0, min(y - 2, 10)), 6))  # firebar anchor
         elif b == 0x11:
             spawns.append((x, 2, 11))  # Lakitu drops Spinies from his cloud
@@ -230,7 +234,11 @@ def area(name, kind):
         spawns = [e for e in spawns if e[0] < goal - 12]
         spawns.append((goal - 6, 6, 5))
     return (
-        (cols if name == "UndergroundArea3" else cols[: goal + 17]),
+        (
+            cols
+            if name in ("UndergroundArea1", "UndergroundArea3")
+            else cols[: goal + 17]
+        ),
         goal,
         sorted(spawns),
     )
@@ -254,20 +262,38 @@ def graphics():
         key = n, palette
         if key in cache:
             return cache[key]
-        idx = cache[key] = len(cache)
+        idx = len(patterns) // 8
         for row in pixels(raw, n):
             s = [palette[v] for v in row]
             ranked = sorted(set(s), key=lambda v: (-s.count(v), v))
             # Preserve backdrop/outline even on a busy scanline.
             bg = 0 if 0 in s else ranked[0]
             fg = next((v for v in ranked if v != bg), bg)
+            if n in (0xAA, 0xAB, 0xBA, 0xBB, 0xAC, 0xAD, 0xBC, 0xBD) and bg == 0:
+                # A 9918 pattern row cannot carry NES transparency AND three
+                # inks. Use negative space for the coin's stamped inner rim.
+                fg = 11
+                patterns.append(sum((v == 1) << (7 - i) for i, v in enumerate(row)))
+                colors.append(fg << 4)
+                continue
             patterns.append(
                 sum(
-                    (v == fg or (v != bg and v != 1)) << (7 - i)
+                    (v == fg or (v != bg and (bg == 0 or v != 1))) << (7 - i)
                     for i, v in enumerate(s)
                 )
             )
             colors.append(fg * 16 + bg)
+        if idx >= 37:
+            for old in range(idx):
+                if (
+                    patterns[-8:] == patterns[8 * old : 8 * old + 8]
+                    and colors[-8:] == colors[8 * old : 8 * old + 8]
+                ):
+                    del patterns[-8:]
+                    del colors[-8:]
+                    idx = old
+                    break
+        cache[key] = idx
         return idx
 
     for i in range(37):
@@ -284,6 +310,8 @@ def graphics():
             continue
         tiles = [int(v, 16) for v in re.findall(r"\$(\w\w)", m[1])[:4]]
         palette = palettes[idx >> 6]
+        if idx in (0xC2, 0xC3):
+            palette = (0, 11, 10, 1)
         if idx == 0x52:
             palette = (0, 7, 4, 1)
         if idx in (0x62, 0x89):
@@ -292,6 +320,8 @@ def graphics():
             meta[i * 256 + idx] = convert(tiles[j], palette)
         flags[idx] = int("MTILE_SOLID" in line and idx not in (0xC2, 0xC3, 0x24, 0x25))
         idx += 1
+    # Add HUD punctuation without consuming another metatile palette group.
+    # Unused glyphs at the very end of the pattern bank.
     # Decode only the title sign from the NES PPU update stream, not its
     # attribute table, player selector or copyright line.
     data = (ROOT / "chr/raw/titlescreen.bin").read_bytes()
@@ -308,6 +338,33 @@ def graphics():
                 logo[(row - 4) * 22 + col - 5] = convert(tile, (0, 11, 6, 1))
             address += 32 if cmd & 128 else 1
         i += 1 if cmd & 64 else count
+    for rows, col in [
+        ([0, 0, 0, 126, 0, 0, 0, 0], 0xF0),
+        ([24, 60, 118, 118, 118, 118, 60, 24], 0xB0),
+    ]:
+        patterns.extend(rows)
+        colors.extend([col] * 8)
+    (OUT / "glyphs.inc").write_text(
+        f"DASH equ {len(patterns) // 8 - 2}\nHUD_COIN equ DASH+1\n"
+    )
+    pulse_ids = sorted(
+        {
+            meta[quarter * 256 + tile]
+            for quarter in range(4)
+            for tile in (0xC0, 0xC2, 0xC3)
+        }
+    )
+    first, last = pulse_ids[0], pulse_ids[-1] + 1
+    pulse = bytearray()
+    for gold in (11, 10, 11, 10):
+        for byte in colors[first * 8 : last * 8]:
+            inks = [(gold if ink == 11 else ink) for ink in divmod(byte, 16)]
+            pulse.append(inks[0] * 16 + inks[1])
+    (OUT / "pulse.bin").write_bytes(pulse)
+    with (OUT / "glyphs.inc").open("a") as out:
+        out.write(
+            f"PULSE_OFFSET equ {first * 8}\nPULSE_BYTES equ {(last - first) * 8}\n"
+        )
     assert len(patterns) <= 2048
     (OUT / "title.bin").write_bytes(logo)
     for name, buf in [
@@ -317,25 +374,29 @@ def graphics():
         ("solid", flags),
     ]:
         (OUT / (name + ".bin")).write_bytes(buf)
-    mario = (ROOT / "chr/mmc3/sprites_mario.chr").read_bytes()[2048:]
+    banks = (ROOT / "chr/mmc3/sprites_mario.chr").read_bytes()
+    mario_frames(banks)
     enemy = (ROOT / "chr/mmc3/sprites_overworld.chr").read_bytes()
-    sprites = bytearray()
-    big = (ROOT / "chr/mmc3/sprites_mario.chr").read_bytes()
-    for bank, offset in [(mario, 0), (big, 0), (big, 0x20)]:
-        for flip in [False, True]:
-            for pose in [0, 4, 20]:
-                for mask in [(1,), (2,), (3,)]:
-                    sprite(sprites, bank, offset + pose, flip, mask)
-    # The first 144 sprite patterns belong to the current Mario size. Swap
-    # only those on growth/shrink; the remaining patterns stay resident.
-    (OUT / "super.bin").write_bytes(sprites[576:])
-    sprites[576:] = bytes(576)
+    sprites = bytearray(24 * 8)  # two streamed 16x16 three-colour Mario halves
 
     def pair(raw, tiles, masks=((1, 3), (2,))):
         packed = b"".join(raw[i * 16 : i * 16 + 16] for i in tiles)
         for mask in masks:
             sprite(sprites, packed, 0, False, mask)
 
+    # Koopa's head and body are separate 8x16 NES sprite pairs, not a
+    # single four-tile box. The head has different IDs in each gait frame.
+    for flip in (False, True):
+        for tiles in ((0x38, 0x12), (0x18, 0x16), (0x30, 0x32), (0x34, 0x36)):
+            half = b"".join(enemy[n * 16 : (n + 2) * 16] for n in tiles)
+            for mask in ((1, 3), (2,)):
+                sprite(sprites, half, 0, flip, mask)
+    misc = (ROOT / "chr/mmc3/sprites_misc.chr").read_bytes()
+    for mask in ((1, 3), (2,)):
+        sprite(sprites, misc, 0x34, False, mask)  # 88,92: star
+    for mask in ((1, 3), (2,)):
+        sprite(sprites, misc[0x1A * 16 : 0x1C * 16] * 2, 0, False, mask)  # girder
+    sprites.extend(bytes(144 * 8 - len(sprites)))
     for pose in (0x30, 0x34):
         pair(enemy, range(pose, pose + 4))
     # The original shell uses the same half, mirrored on the right.
@@ -360,11 +421,9 @@ def graphics():
     # Each half of a 16x16 sprite occupies sixteen consecutive bytes.
     sprites.extend(bytes(6) + bytes([3, 7, 7, 3]) + bytes(6))
     sprites.extend(bytes(6) + bytes([192, 224, 224, 192]) + bytes(6))
-    # Triangular pennant, pointing left toward the player.
-    rows = [(1 << min(15, 2 * i + 1)) - 1 for i in range(8)] + [0] * 8
-    sprites.extend(v >> 8 for v in rows)
-    sprites.extend(v & 255 for v in rows)
-    assert len(sprites) == 248 * 8
+    for mask in ((2,), (1, 3)):
+        sprite(sprites, enemy[1024:], 0x32, False, mask)
+    assert len(sprites) == 252 * 8
     (OUT / "sprites.bin").write_bytes(sprites)
     # Swap the castle boss out of VRAM for the outdoor enemy bank.
     sprites = bytearray()
@@ -377,6 +436,78 @@ def graphics():
         for mask in [(1, 3), (2,)]:
             sprite(sprites, raw, pose, False, mask)
     (OUT / "outdoor.bin").write_bytes(sprites)
+
+
+def mario_frames(banks):
+    """Expand the source 8x16 pairs, deduplicating identical 16x16 halves.
+    A frame descriptor names just two halves; only changed poses are uploaded.
+    """
+    src = (ROOT / "src/metasprite.s").read_text()
+    frames = []
+    halves = {}
+    data = bytearray()
+    poses = [
+        "STANDING",
+        "WALKING_1",
+        "WALKING_2",
+        "WALKING_3",
+        "SKIDDING",
+        "JUMPING",
+        "CROUCHING",
+        "CLIMBING_1",
+        "CLIMBING_2",
+        "DEATH",
+        "GROW_INTERMEDIATE",
+    ]
+    poses += [f"SWIMMING_{n}_{phase}" for phase in ("KICK", "HOLD") for n in (1, 2, 3)]
+    for size in ("SMALL", "BIG", "FIRE"):
+        for pose in poses:
+            obj = size + "_MARIO"
+            name = pose
+            if pose == "DEATH":
+                obj = "SMALL_MARIO"
+            if pose == "GROW_INTERMEDIATE":
+                obj = "BIG_MARIO"
+            if size == "SMALL" and pose == "CROUCHING":
+                name = "STANDING"
+            if size == "SMALL" and pose == "SWIMMING_3_HOLD":
+                name = "SWIMMING_3_KICK"
+            if size == "FIRE" and pose.startswith("CLIMB"):
+                obj = "BIG_MARIO"
+            if obj == "FIRE_MARIO" and pose == "WALKING_1":
+                name = "STANDING"
+            m = re.search(
+                r'^MetaspriteBox "' + obj + '", "' + name + r'",(.*)$',
+                src,
+                re.MULTILINE,
+            )
+            ids = [int(n, 16) for n in re.findall(r"\$(\w{2})", m[1])]
+            bank = (
+                2
+                if obj == "SMALL_MARIO"
+                else 1
+                if obj == "FIRE_MARIO" or pose.startswith(("CLIMB", "SWIM", "GROW"))
+                else 0
+            )
+            if obj == "FIRE_MARIO" and pose == "CROUCHING":
+                bank = 3
+            bank = banks[bank * 1024 :]
+            for flip in (False, True):
+                ptrs = []
+                for i in range(0, len(ids), 2):
+                    raw = b"".join(bank[n * 16 : n * 16 + 32] for n in ids[i : i + 2])
+                    buf = bytearray()
+                    for mask in ((1,), (2,), (3,)):
+                        sprite(buf, raw, 0, flip, mask)
+                    if bytes(buf) not in halves:
+                        halves[bytes(buf)] = len(data)
+                        data.extend(buf)
+                    ptrs.append("mario_data+" + str(halves[bytes(buf)]))
+                if len(ptrs) == 1:
+                    ptrs.insert(0, "0")
+                frames.append(" dw " + ",".join(ptrs))
+    (OUT / "poses.inc").write_text("pose_list:\n" + "\n".join(frames) + "\n")
+    (OUT / "mario.bin").write_bytes(data)
 
 
 def sprite(out, raw, pose, flip, mask):
@@ -422,11 +553,10 @@ def bonus_routes(name, ident, world):
 
 
 def compile_game():
-    from music import compile_music
 
     OUT.mkdir(exist_ok=True, parents=True)
     graphics()
-    compile_music(ROOT, OUT)
+
     common = (ROOT / "src/common.s").read_text()
     stages = []
     areas = {}
@@ -459,6 +589,7 @@ def compile_game():
             asm += [
                 f"{name}: dw columns_{name}, enemies_{name}, {goal * 16}",
                 f" db {kind}",
+                f" dw lifts_{name}",
                 f"columns_{name}:",
             ]
             ids = [pool.setdefault(tuple(c), len(pool)) for c in cols]
@@ -466,7 +597,14 @@ def compile_game():
                 " dw " + ",".join(f"column{i}" for i in ids[j : j + 12])
                 for j in range(0, len(ids), 12)
             ]
-            asm += [f"enemies_{name}:"]
+            asm += [f"lifts_{name}:"]
+            for x, y, b in objects(table("E_" + name) + [255], True):
+                if 0x24 <= (b & 63) <= 0x2C:
+                    asm += [
+                        f" dw {x * 16}",
+                        f" db {max(0, min(11, y - 1)) * 16},{b & 63}",
+                    ]
+            asm += [" dw 65535", f"enemies_{name}:"]
             for x, y, style in spawns:
                 asm += [f" dw {x * 16}", f" db {y * 16 + style}"]
             asm += [" dw 65535", " db 0"]
@@ -499,6 +637,7 @@ def compile_game():
         asm += [
             f"bonus_room{room}: dw bonus_cols{room}, empty_enemies,208",
             " db 2",
+            " dw empty_enemies",
             f"bonus_cols{room}: dw " + ",".join(f"column{i}" for i in ids),
         ]
     asm += ["empty_enemies: dw 65535"]

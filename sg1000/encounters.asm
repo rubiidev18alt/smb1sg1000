@@ -1,16 +1,4 @@
-; Swap Mario's character bank when growing/shrinking. Pattern 144 and up
-; remains available for actors even when the two-part Super Mario is active.
-player_gfx:
-        ld hl,$3800
-        call address
-        ld hl,sprites
-        ld de,576
-        ld a,(s+State.big)
-        or a
-        jp z,transfer
-        ld hl,super_patterns
-        ld de,1152
-        jp transfer
+        include "animation.asm"
 
 ; Fire suit: button 2 launches one bouncing shot, also usable while running.
 fireball:
@@ -25,6 +13,8 @@ fireball:
         ret z
         ld a,1
         ld (shot+Actor.active),a
+        ld a,9
+        ld (s+State.throwing),a
         ld a,(s+State.py)
         ld (shot+Actor.y),a
         ld a,(s+State.px)
