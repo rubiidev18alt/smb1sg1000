@@ -7,7 +7,7 @@
 | Controller 1 | Action |
 | --- | --- |
 | Left / Right | Walk |
-| Button 1 | Jump; release early for a short hop. Tap to swim underwater. |
+| Button 1 | Hold to clear a four-block ledge from a standstill; release early for a short hop. Tap to swim underwater. |
 | Button 2 | Hold to run; press to shoot as Fire Mario. |
 | Down | Enter a connected pipe while standing on its mouth. |
 | Button 1 on the title | Start the selected course. |

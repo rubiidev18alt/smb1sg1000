@@ -195,7 +195,7 @@ move_y: ld a,(s+State.edge)
         ld hl,(s+State.vx)
         bit 7,h
         call nz,neg_hl
-        ld de,$2070
+        ld de,$1e70             ; 67px held jump from rest clears four 16px blocks
         ld b,-4
         ld a,h
         or a

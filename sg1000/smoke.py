@@ -222,6 +222,24 @@ select(1)
 flags, _ = run_tape("roof-warp")
 assert {"roof", "card"} <= flags and st("stage") == 4
 core.retro_reset()
+# 6-2: approach the first tall pipe (column 19) and jump from a dead stop.
+select(21)
+for _ in range(230):
+    frame(1, 7, 8)
+    if scroll() + st("px") == 290:
+        break
+frame(8, 7)
+assert scroll() + st("px") == 290 and st("py") == 160 and st("floor")
+frame(8)  # remove the run-up entirely
+frame(1, 0)  # a tap must not clear four blocks
+for _ in range(60):
+    frame(1)
+    assert st("py") > 96
+assert st("floor") and st("py") == 160
+for _ in range(64):
+    frame(1, 7, 0)  # hold jump toward the pipe, without Run
+assert st("floor") and st("py") == 96 and 304 <= scroll() + st("px") < 336
+core.retro_reset()
 select(2)
 _, riding = run_tape("lifts-1-3")
 assert st("stage") == 3 and riding >= 10
@@ -292,5 +310,5 @@ assert st("lives") == 3 and st("stage") == 0
 assert video_sizes == {(256, 192)}
 core.retro_deinit()
 print(
-    f"PASS: {video_frames} frames; 1-1 Starman and bonus routes, 1-2 roof to world 2, 1-3 moving lifts, 2-1 spawn, 2-2 and 7-2 swims, 2-4 castle clear, 5-2 spring and offscreen return, lives cards and pipe intros, music, selector wrap and restart"
+    f"PASS: {video_frames} frames; 1-1 Starman and bonus routes, 1-2 roof to world 2, 1-3 moving lifts, 2-1 spawn, 2-2 and 7-2 swims, 2-4 castle clear, 5-2 spring and offscreen return, 6-2 four-block standing jump, lives cards and pipe intros, music, selector wrap and restart"
 )
