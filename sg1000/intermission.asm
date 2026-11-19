@@ -26,7 +26,13 @@ lives_card:
         ld (s+State.forced),a   ; standing, facing right
         ld (s+State.scene),a
         call black_page
-        ld hl,$192b
+        ld a,(s+State.quest)
+        or a
+        jr z,.world
+        ld hl,$18ea
+        ld de,quest_label
+        call text
+.world: ld hl,$192b
         ld de,hud_world
         call text
         call stage_digits
@@ -82,6 +88,7 @@ blank_time:
         ld de,spaces
         jp text
 spaces: db '   ',0
+quest_label: db 'SECOND QUEST',0
 times_text: db 'X  ',0
 
 pipe_intro:

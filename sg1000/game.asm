@@ -83,6 +83,8 @@ effect_x byte
 quest byte                      ; cleared on power-on, earned by rescuing Peach
 outside byte                    ; emerged from an underground/water exit
 expired byte                    ; set only by the timer, not by enemy/pit deaths at 000
+hard    byte                    ; SecondaryHardMode (Quest 2, or 5-3 onward)
+liftwidth byte                  ; 32 or 48 pixels, shared by SAT and collision
         ends
 s       equ $c100
         struct Actor
@@ -95,6 +97,13 @@ style   byte
 actors  equ $c150                ; two walkers + one mushroom
 item    equ actors+2*Actor
 shot    equ item+Actor
+; Parallel records for the two enemy slots (same stride as Actor). The
+; visible style changes to a shell, but its species and wake timer survive.
+birth   equ 4*Actor
+wake_lo equ birth+1
+wake_hi equ birth+2
+throw_cd equ birth+3
+        assert actors+2*Actor+throw_cd < $c180
 sat     equ $c180
 
 boot:   ld sp,$c400
@@ -244,15 +253,24 @@ title:  call silence
         ld a,(s+State.edge)
         bit 4,a
         jr nz,restart
-        bit 5,a
+        bit 0,a                  ; Up/Down choose the quest without a save file
+        jr z,.down
+        ld a,1
+        jr .quest
+.down:  bit 1,a
+        jr z,.cycle
+        xor a
+.quest: ld (s+State.quest),a
+        jr .select
+.cycle: bit 5,a
         jr z,.wait
 .increment:ld a,(s+State.quest)
         or a
-        ld a,1
-        jr z,.select_step
-        ld a,4
-.select_step:ld hl,s+State.stage
-        add a,(hl)
+        ld a,(s+State.stage)
+        jr z,.next_stage
+        and $1c                 ; Quest 2 selects the next world, always at -1
+        add a,3
+.next_stage:inc a
         and 31
         ld (s+State.stage),a
         jr .select
@@ -453,6 +471,20 @@ load_area:
         ld de,s+State.nextcol
         ld bc,9                 ; column list, spawn list, goal X, environment
         ldir
+        ld a,(s+State.stage)
+        cp 18                   ; the late first-quest courses use hard objects too
+        ld a,(s+State.quest)
+        jr c,.difficulty
+        ld a,1
+.difficulty:ld (s+State.hard),a
+        or a
+        jr nz,.small_lifts
+        ld a,(s+State.kind)
+        cp 3
+        ld a,48
+        jr nz,.lift_width
+.small_lifts:ld a,32
+.lift_width:ld (s+State.liftwidth),a
         ld a,(s+State.bonus)
         or a
         ld a,1
@@ -561,11 +593,39 @@ load_area:
         call transfer
         ld a,(s+State.quest)
         or a
-        jr z,.music
+        ld hl,sprites+(216-24)*8
+        jr z,.walk_art
+        ld hl,beetle_art
+.walk_art:push hl
         ld hl,$3800+216*8
         call address
-        ld hl,beetle_art
+        pop hl
         ld de,128
+        call transfer
+        ; Podoboos occur only in castles, and no castle has jumpsprings.
+        ; Borrow two 16x16 patterns for a Buzzy shell and restore the other
+        ; bank on every area change (including a change back to Quest 1).
+        ld de,sprites+(128-24)*8
+        ld hl,sprites+(144-24)*8
+        ld a,(s+State.quest)
+        or a
+        jr z,.env
+        ld a,(s+State.kind)
+        cp 3
+        jr z,.castle_shell
+        ld de,beetle_shell
+        jr .env
+.castle_shell:ld hl,beetle_shell
+.env:   push hl
+        ld hl,$3800+128*8
+        call address
+        ex de,hl
+        ld de,64
+        call transfer
+        ld hl,$3800+144*8
+        call address
+        pop hl
+        ld de,64
         call transfer
 .music: ld a,(s+State.kind)
         call start_music
@@ -867,6 +927,7 @@ finish_area:
         ld (s+State.py),a
         jp play
         include "goals.asm"
+beetle_shell: incbin "../build/sg1000/beetle_shell.bin"
 beetle_art: incbin "../build/sg1000/beetle.bin"
 game_over_wait:
 .wait:  push bc

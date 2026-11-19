@@ -97,15 +97,19 @@ def frame(n, *keys):
         core.retro_run()
 
 
-def select(slot=0):
+def select(slot=0, *, second=False):
     frame(120)
     assert ram[symbols["playing"] - 0xC000] == 0
     assert st("stage") == 0 and st("lives") == 3
     for _ in range(slot):
         frame(2, 8)
         frame(2)
+    if second:
+        frame(3, 4)  # Up on the title
+        frame(2)
     frame(3, 0)
     wait_entry(slot)
+    assert st("quest") == int(second)
 
 
 def wait_entry(slot, *, retry=False):
@@ -197,7 +201,7 @@ def run_tape(name):
                 if (
                     st("floor")
                     and st("py") + 16 == ram[p + 2]
-                    and -12 <= st("px") - x < 46
+                    and -13 <= st("px") - x < st("liftwidth") - 2
                 ):
                     riding += 1
     return flags, riding
@@ -304,6 +308,7 @@ for _ in range(64):
 assert st("floor") and st("py") == 96 and 304 <= scroll() + st("px") < 336
 core.retro_reset()
 select(2)
+assert st("liftwidth") == 48
 _, riding = run_tape("lifts-1-3")
 assert riding >= 10
 finish_pole(2)
@@ -345,8 +350,72 @@ assert st("quest") == 1 and st("stage") == 0
 frame(2, 8)
 frame(3)
 assert st("stage") == 4  # Button 2 selects worlds on the second quest
+for _ in range(7):
+    frame(2, 8)
+    frame(3)
+assert st("stage") == 0
+frame(3, 0)
+wait_entry(0)
+assert st("hard") and st("quest") and st("liftwidth") == 32
+run_tape("quest2-1-1")
+finish_pole(0)
+wait_entry(1)
+assert st("quest") == 1 and st("lives") == 3
+
+core.retro_reset()
+select(2, second=True)
+assert st("liftwidth") == 32
+_, riding = run_tape("quest2-1-3")
+assert riding >= 10
+finish_pole(2)
+
+# Stomp the opening Buzzy and leave its shell alone until it revives.
+core.retro_reset()
+select(second=True)
+frame(89, 7, 8)
+frame(40, 7, 8, 0)
+p = symbols["actors"] - 0xC000
+for _ in range(25):
+    frame(1)
+    if ram[p + 4] == 2:
+        break
+assert ram[p] and ram[p + 4] == 2 and ram[p + symbols["wake_lo"]] == 231
+frame(2)
+sat_base = symbols["sat"] - 0xC000
+parts = []
+for i in range(32):
+    j = sat_base + 4 * i
+    if ram[j] == 0xD0:
+        break
+    parts.append(ram[j + 2])
+assert {128, 132} <= set(parts)  # actual two-layer Buzzy shell, not a Goomba/Koopa
+frame(228)
+assert ram[p] and ram[p + 4] == 2
+frame(1)
+assert ram[p] and ram[p + 4] == 0 and st("lives") == 3
+
+# The second Podoboo at column 20 in 2-4 is marked hard-only in the
+# original enemy stream. The same controller input should expose it in
+# the second quest but not on a first-quest visit to that castle.
+for second in (False, True):
+    core.retro_reset()
+    select(7, second=second)
+    peak = 0
+    for i in range(140):
+        frame(1, *((7, 8, 0) if i < 29 else (7, 8)))
+        peak = max(peak, sum(bool(ram[p + j] and ram[p + j + 4] == 13) for j in (0, 5)))
+        if scroll() + st("px") >= 230:
+            break
+    assert peak == 1 + int(second) and st("lives") == 3
+
+
 core.retro_reset()
 frame(120)
+frame(3, 4)
+frame(2)
+frame(3, 5)  # Down returns to Quest 1 and the original stage selector
+frame(2)
+assert not st("quest")
 for i in range(1, 33):
     frame(4, 8)
     frame(3)
@@ -431,5 +500,5 @@ assert st("lives") == 3 and st("stage") == 0
 assert video_sizes == {(256, 192)}
 core.retro_deinit()
 print(
-    f"PASS: {video_frames} frames; 1-1 Starman and bonus routes, 1-2 roof to world 2, 1-3 moving lifts, 2-1 spawn, 2-2 and 7-2 swims, 2-4 castle clear, 5-2 spring and offscreen return, 6-2 four-block standing jump, lives cards and pipe intros, music, selector wrap, pit death, hurry-up and last-life timeout; timer bonuses, fireworks, bridge collapse, Toad and Peach endings"
+    f"PASS: {video_frames} frames; 1-1 Starman and bonus routes, 1-2 roof to world 2, 1-3 moving lifts, 2-1 spawn, 2-2 and 7-2 swims, 2-4 castle clear, 5-2 spring and offscreen return, 6-2 four-block standing jump, lives cards and pipe intros, music, selector wrap, pit death, hurry-up and last-life timeout; timer bonuses, fireworks, bridge collapse, Toad and Peach endings, second-quest clears and Buzzy revival"
 )

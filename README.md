@@ -10,8 +10,9 @@
 | Button 1 | Hold to clear a four-block ledge from a standstill; release early for a short hop. Tap to swim underwater. |
 | Button 2 | Hold to run; press to shoot as Fire Mario. |
 | Down | Enter a connected pipe while standing on its mouth. |
+| Up / Down on the title | Select the second / first quest. |
 | Button 1 on the title | Start the selected course. |
-| Button 2 on the title | Advance one level: 1–4, then the next world. After 8-4 it wraps to 1-1. |
+| Button 2 on the title | Advance one level: 1–4, then the next world. After 8-4 it wraps to 1-1. In the second quest it selects the next world instead. |
 | Either button on Game Over | Return to title early. |
 | Button 2 after Peach’s final message | Return to the title for the harder quest. Button 2 now selects worlds. |
 
@@ -21,7 +22,9 @@ Course starts, retries, and warp-zone arrivals show a timed black **WORLD / Mari
 
 Grab the flagpole above its stone base: the height of the grab earns **100, 400, 800, 2,000 or 5,000 points**. Mario slides down, turns, and walks through the castle door. Each remaining unit of time counts down for **50 points**; a final timer digit of **1, 3 or 6** sets off that many fireworks for **500 points each**. The underground and swimming exits lead back outside to a playable staircase and flagpole, not straight to the next course.
 
-In castles, touch the axe to cut the chain and watch the bridge fall away under Bowser. Mario walks to Toad in worlds 1–7. In **8-4**, Peach’s message and victory music stay up until you press **Button 2**. The second quest enables hard-only spawns from world 1, faster walkers, and fireproof Buzzy Beetles in place of Goombas. Power-cycling returns to the first quest.
+In castles, touch the axe to cut the chain and watch the bridge fall away under Bowser. Mario walks to Toad in worlds 1–7. In **8-4**, Peach’s message and victory music stay up until you press **Button 2**. This returns to the title with the second quest selected. Power-cycling defaults to the first quest.
+
+**Second quest:** You can also press **Up** on the title to try the harder route without beating 8-4. It uses the same 32 courses, with hard-only enemies active from 1-1. Ordinary walkers move at ¾ pixel per tick instead of ½. Buzzy Beetles replace Goombas, resist fire even in their shells, and revive after 231 ticks if left alone (versus 336 for a shell in the first quest). Moving girders shrink from 48 to 32 pixels and Hammer Bros. throw more often. These smaller girders and harder encounters also appear in the late first quest, starting at 5-3; castle lifts are always narrow. The lives card identifies the second quest on entry and on retries. [Watch the Quest 2 start and Buzzy shell revival in Gearsystem.](sg1000/second-quest.gif)
 
 Gearsystem captures: [1-1 flagpole and six fireworks](sg1000/goal.gif) · [8-4 bridge and final rescue (ending spoiler)](sg1000/final-rescue.gif).
 
@@ -43,7 +46,7 @@ make sg1000         # writes build/smb1.sg
 make sg1000-test    # verify the assembled ROM against the source area tables
 ```
 
-For a controller-driven emulator test, run `make sg1000-test GEARSYSTEM_CORE=/path/to/gearsystem_libretro.so`. The recorded pad inputs clear 1-1 both overland (collecting Starman) and through the bonus pipe, take the 1-2 roof to world 2, and clear 1-3 using moving lifts. It also checks an enemy spawn in 2-1, swims through both 2-2 and 7-2, clears the lava pits and Bowser bridge in 2-4, bounces Mario off the 5-2 spring and checks that he disappears above the screen and returns on descent. The goal replays check timer and firework scores, Bowser’s bridge in 2-4 and 8-4, the rescue sequence, and second-quest world selection. The suite also checks audio output, title wraparound, life loss and restart. Tested in Gearsystem; not verified on a physical console.
+For a controller-driven emulator test, run `make sg1000-test GEARSYSTEM_CORE=/path/to/gearsystem_libretro.so`. The recorded pad inputs clear 1-1 both overland (collecting Starman) and through the bonus pipe, take the 1-2 roof to world 2, and clear 1-3 using moving lifts. It also checks an enemy spawn in 2-1, swims through both 2-2 and 7-2, clears the lava pits and Bowser bridge in 2-4, bounces Mario off the 5-2 spring and checks that he disappears above the screen and returns on descent. The goal replays check timer and firework scores, Bowser’s bridge in 2-4 and 8-4, the rescue sequence, and second-quest world selection. Controller replays also clear second-quest 1-1 and 1-3, measure a Buzzy shell’s revival, and check hard-only enemies in 2-4. The suite also checks audio output, title wraparound, life loss and restart. Tested in Gearsystem; not verified on a physical console.
 
 The native code is in [`sg1000/`](sg1000/). It uses 1 KiB of work RAM and 16 KiB of VRAM. Sixteen mutable columns stream from cartridge ROM. Overlapping column data share cartridge storage without runtime decompression. The renderer prepares the next name table, sprite attribute table and changed Mario pose offscreen. It switches the tables together at vertical blank during play, so a scrolling background doesn’t get a frame ahead of its sprites.
 

@@ -603,8 +603,12 @@ def graphics():
 
     sprites = bytearray()
     for pose in (0, 4):
-        pieces(enemy, pose, pose + 2)
+        for mask in ((1,), (2, 3)):
+            sprite(sprites, enemy, pose, True, mask)  # approaching Mario, facing left
     (OUT / "beetle.bin").write_bytes(sprites)
+    sprites = bytearray()
+    pieces(enemy, 0x20, masks=((1,), (2, 3)))
+    (OUT / "beetle_shell.bin").write_bytes(sprites)
 
 
 def mario_frames(banks):

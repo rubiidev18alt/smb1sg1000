@@ -32,7 +32,7 @@ fireball:
         ld a,(shot+Actor.x)
         add a,b
         cp 240
-        jr nc,.end
+        jp nc,.end
         ld (shot+Actor.x),a
         add a,8
         ld d,a
@@ -70,12 +70,7 @@ fireball:
         or a
         ret z
         ld a,(ix+Actor.style)
-        or a
-        jr nz,.type
-        ld a,(s+State.quest)
-        or a
-        ret nz                  ; second-quest Buzzy Beetles resist fire
-.type:  cp 5
+        cp 5
         ret z
         cp 6
         ret z
@@ -91,7 +86,16 @@ fireball:
         add a,12
         cp 25
         ret nc
-        ld (ix+Actor.active),0
+        ld a,(s+State.quest)
+        or a
+        jr z,.kill
+        ld a,(ix+Actor.style)
+        cp 4
+        jr nc,.kill
+        ld a,(ix+birth)         ; walking, resting and kicked Buzzies resist fire
+        or a
+        jr z,.end
+.kill:  ld (ix+Actor.active),0
 .end:   xor a
         ld (shot+Actor.active),a
         ret
@@ -290,7 +294,15 @@ special_actor:
 .gone:  ld (ix+Actor.active),0
         ret
 .bro:   ld c,12
-        jr .throw
+        dec (ix+throw_cd)
+        jr nz,.after
+        ld a,(s+State.hard)
+        or a
+        ld a,$30
+        jr z,.bro_cd
+        ld a,$1c                ; HammerThrowTmrData
+.bro_cd:ld (ix+throw_cd),a
+        jr .slot
 .cloud: ld c,8
         ; Hover ahead of the runner until this cloud leaves the screen.
         ld a,(ix+Actor.x)
@@ -300,7 +312,7 @@ special_actor:
 .throw: ld a,(s+State.tick)
         and 63
         jr nz,.after
-        ld iy,actors
+.slot:  ld iy,actors
         ld a,(iy+Actor.active)
         or a
         jr z,.launch

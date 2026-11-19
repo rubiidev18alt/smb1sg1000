@@ -82,9 +82,10 @@ move_lifts:
         jr z,.visible
         inc a
         jr nz,.skip
-        ld a,l
-        cp 209
-        jr c,.skip
+        ld a,(s+State.liftwidth)
+        add a,l                 ; left edge negative: right edge must be > 0
+        jr nc,.skip
+        jr z,.skip
 .visible:ld (iy+0),l
         ld (iy+1),h
         ld (iy+2),b
@@ -166,8 +167,11 @@ lift_overlap:
         ld a,h
         or a
         ret nz
+        ld a,(s+State.liftwidth)
+        add a,11
+        ld e,a
         ld a,l
-        cp 59
+        cp e
         ret
 lift_sprites:
         ld a,(liftcount)
@@ -180,7 +184,9 @@ lift_sprites:
         ld d,(iy+0)
         ld a,(iy+1)
         ld ixh,a
-        rept 3
+        ld a,(s+State.liftwidth)
+        ld c,a
+.part:  push bc
         ld a,ixh
         or a
         jr nz,1F
@@ -193,7 +199,11 @@ lift_sprites:
         jr nc,2F
         inc ixh
 2:
-        endr
+        pop bc
+        ld a,c
+        sub 16
+        ld c,a
+        jr nz,.part
         ld bc,5
         add iy,bc
         dec ixl

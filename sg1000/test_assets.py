@@ -51,6 +51,15 @@ class CartridgeTest(unittest.TestCase):
         self.assertEqual({style & 15 for _, _, style in spawns}, {4, 14})
         self.assertIn(9, {style & 15 for _, _, style in area("GroundArea18", 1)[2]})
 
+    def test_quest_sprite_banks(self):
+        # In Quest 2 the shell borrows two Podoboo patterns outside castles,
+        # or two spring patterns inside castles. These must never coexist.
+        for i in range(1, 7):
+            cmds = objects(table(f"L_CastleArea{i}")[2:])
+            self.assertFalse(any(y < 12 and b == 11 for _, y, b in cmds))
+        self.assertEqual((OUT / "beetle_shell.bin").stat().st_size, 64)
+        self.assertEqual((OUT / "beetle.bin").stat().st_size, 128)
+
     def test_ending_rooms(self):
         # The bridge wipe addresses the axe, chain and 13 consecutive boards.
         # The rescued character stands twelve columns into the same room.

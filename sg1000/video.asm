@@ -192,6 +192,15 @@ selector_label:
         ld a,(s+State.back)
         xor 1
         ld (s+State.back),a
+        push hl
+        ld hl,$19c2
+        ld de,first_label
+        ld a,(s+State.quest)
+        or a
+        jr z,.label
+        ld de,second_label
+.label: call text
+        pop hl
         ld de,select_prompt
         call text
         call stage_digits
@@ -202,6 +211,8 @@ selector_label:
         xor 1
         ld (s+State.back),a
         ret
+first_label: db 'FIRST QUEST     UP FOR SECOND',0
+second_label: db 'SECOND QUEST   DOWN FOR FIRST',0
 select_prompt: db 'BUTTON 2  WORLD ',0
 stage_digits:
         ld a,(s+State.stage)
@@ -517,9 +528,9 @@ enemy_sprite:
         cp 128
         jr nz,.special
         bit 5,(ix+Actor.dir)
-        jr z,.pair
+        jp z,.pair
         ld c,136
-        jr .pair
+        jp .pair
 .special:cp 240
         jp z,layer
         jp .pair
@@ -531,7 +542,21 @@ enemy_sprite:
         jr z,.fish
         cp 2
         ld c,160
-        jr nc,.pair
+        jr c,.walking
+        ld a,(s+State.quest)
+        or a
+        jr z,.pair
+        ld a,(ix+birth)
+        or a
+        jr nz,.pair
+        ld b,4                  ; NES Buzzy shell, including when kicked
+        ld c,128
+        ld a,(s+State.kind)
+        cp 3
+        jr nz,.pair
+        ld c,144
+        jr .pair
+.walking:
         or a
         jp nz,koopa_sprite
         ld c,216

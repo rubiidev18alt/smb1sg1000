@@ -18,12 +18,9 @@ update_actors:
         bit 7,d
         jr z,.position
         res 7,d
-        ld a,(s+State.quest)
+        ld a,(s+State.hard)
         or a
-        jr nz,.position
-        ld a,(s+State.stage)
-        cp 18                   ; secondary hard mode starts at 5-3
-        jr c,.consume
+        jr z,.consume
 .position:ex de,hl
         ld de,(s+State.scroll)
         or a
@@ -47,6 +44,8 @@ update_actors:
         ld a,b
         and 15
         ld (ix+Actor.style),a
+        ld (ix+birth),a
+        ld (ix+throw_cd),1
         ld a,b
         and $f0
         ld (ix+Actor.y),a
@@ -74,23 +73,29 @@ walker: ld a,(ix+Actor.active)
         cp 3
         jp z,.star_move
         or a
-        jr nz,.fall
-        jr .normal
+        jp nz,.fall
+        ld a,(s+State.tick)      ; power-ups keep their normal speed
+        and 1
+        jr z,.run
+        jp .fall
 .enemy: ld a,(ix+Actor.style)
         cp 7
         jp nc,special_actor
         cp 5
         jp nc,hazard
         cp 2
-        jr z,.fall
+        jr z,.dormant
         cp 3
         jr z,.run
-.normal:ld a,(s+State.tick)
-        and 1
-        jr z,.run
-        ld a,(s+State.quest)
+.normal:ld a,(s+State.quest)
         or a
-        jr z,.fall
+        ld a,(s+State.tick)
+        jr z,.easy_speed
+        and 3                   ; $f4 = -0.75 pixels/tick, vs $f8 = -0.5
+        jr nz,.run
+        jr .fall
+.easy_speed:and 1
+        jr nz,.fall
 .run:
         ld a,(ix+Actor.dir)
         add a,(ix+Actor.x)
@@ -117,6 +122,22 @@ walker: ld a,(ix+Actor.active)
 .turn:  ld a,(ix+Actor.dir)
         neg
         ld (ix+Actor.dir),a
+        jr .fall
+.dormant:ld l,(ix+wake_lo)
+        ld h,(ix+wake_hi)
+        dec hl
+        ld (ix+wake_lo),l
+        ld (ix+wake_hi),h
+        ld a,h
+        or l
+        jr nz,.fall
+        ld a,(ix+birth)         ; restore Koopa or Buzzy instead of a generic walker
+        ld (ix+Actor.style),a
+        ld (ix+Actor.dir),-1
+        ld a,(s+State.px)
+        cp (ix+Actor.x)
+        jr nc,.fall
+        ld (ix+Actor.dir),1
 .fall:  ld a,(ix+Actor.style)
         cp 4
         jr z,.touch
@@ -185,7 +206,7 @@ walker: ld a,(ix+Actor.active)
         ld de,item
         or a
         sbc hl,de
-        jr z,.grow
+        jp z,.grow
         ld hl,(s+State.star)
         ld a,h
         or l
@@ -209,7 +230,7 @@ walker: ld a,(ix+Actor.active)
         jp nz,.hurt
         ld a,b
         cp 10
-        jr nc,.hurt
+        jp nc,.hurt
         ld a,-6
         ld (s+State.vy),a
         ld a,1
@@ -226,6 +247,13 @@ walker: ld a,(ix+Actor.active)
         cp 3
         jr nz,.remove
 .shell: ld (ix+Actor.style),2
+        ld hl,16*21             ; NES RevivalRateData in interval ticks
+        ld a,(s+State.quest)
+        or a
+        jr z,.timer
+        ld hl,11*21
+.timer: ld (ix+wake_lo),l
+        ld (ix+wake_hi),h
         ret
 .kick:  ld (ix+Actor.style),3
         ld c,3
