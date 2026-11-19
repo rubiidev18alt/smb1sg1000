@@ -18,6 +18,8 @@ The cartridge follows the **32-stage, eight-world main route** using SMB1Base’
 
 Course starts, retries, and warp-zone arrivals show a timed black **WORLD / Mario × lives** card. No button press is needed. On first entry to 1-2, 2-2, 4-2 and 7-2, Mario walks out of the castle and into the sideways pipe while only the overworld lead-in plays. Underground and underwater music start on arrival. A retry resumes the course without repeating the walk, and ordinary bonus-pipe trips stay within the current course. [Preview the 1-2 entrance in Gearsystem.](sg1000/pipe-intro.gif)
 
+A fatal hit freezes the action: Mario pauses, pops up, then falls through the floor while the death tune plays. A pit fall stays offscreen instead. When the clock goes from 100 to 099, the hurry-up cue plays and the course music resumes faster. At 000, Mario goes through the death sequence before the black **TIME UP** screen, then the lives card or **GAME OVER** on his last life. [Watch a timeout in Gearsystem.](sg1000/time-up.gif)
+
 In **2-2 and 7-2**, the waterline is visible just below the HUD. Tap Button 1 to swim through the coral, collect submerged coins and dodge Bloopers and Cheep Cheeps. The shared enemy command launches fish here and Bullet Bills on land. The title waits in silence; starting an overworld course plays the opening phrase before the main loop.
 
 ![World 2-2 captured in Gearsystem](sg1000/underwater.png)

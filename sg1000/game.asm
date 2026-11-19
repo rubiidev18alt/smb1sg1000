@@ -67,7 +67,7 @@ yview   byte
 tall    byte
 morph   byte
 theme   byte                    ; last uploaded theme + 1
-scene   byte                    ; 0 gameplay, 1 lives card, 2 pipe entrance
+scene   byte                    ; 0 gameplay, 1 lives card, 2 pipe entrance, 3 time up, 4 game over
 pipeclip byte                   ; pixels hidden by the pipe mouth
 duck    byte
 spring_y byte                   ; 0 if no spring is visible
@@ -75,6 +75,7 @@ spring_x byte
 spring_t byte                   ; compression/rebound countdown
 satpage byte                    ; 0 or 4: SAT at $1b00 or $1f00
 posetab byte                    ; 0 or 104: active pose pattern base
+expired byte                    ; set only by the timer, not by enemy/pit deaths at 000
         ends
 s       equ $c100
         struct Actor
@@ -258,7 +259,7 @@ play:   call prepare_sprites
         call input
         ld hl,s+State.tick
         inc (hl)
-        call music_tick
+        call gameplay_music
         call pulse_tiles
         call anim_tick
         call clock
@@ -297,7 +298,7 @@ play:   call prepare_sprites
         jr c,.alive
         ld a,(s+State.above)
         or a
-        jp z,died
+        jp z,pit_death
 .alive:
         call collect
         call try_pipe
@@ -364,6 +365,7 @@ load_stage:
         ld (s+State.divider),a
         xor a
         ld (s+State.timer),a
+        ld (s+State.expired),a
         ld (s+State.bonus),a
         ld l,a
         ld h,a
@@ -738,58 +740,107 @@ slide_pole:
         include "video.asm"
         include "lifts.asm"
 
+pit_death:
+        ; Falling into a hole has no upward kick. Park just below the screen.
+        ld a,192
+        ld (s+State.py),a
+        jr died
+expired:
+        ld a,1
+        ld (s+State.expired),a
+; KillPlayer / PlayerDeath: stop the world, select small Mario's death pose,
+; freeze for TimerControl $ff..$f0, then move without input or collisions.
 died:   ld sp,$c400             ; also reachable from nested actor collision
         xor a
         ld (s+State.big),a
         ld (s+State.immune),a
         ld (s+State.star),a
         ld (s+State.star+1),a
-        ld a,5
-        call start_music
         ld a,10
         ld (s+State.forced),a
-        ld b,40
-.death: push bc
+        ld a,5
+        call start_music
+        call draw_sprites
+        ld a,(s+State.above)
+        or a
+        jr nz,.hold
+        ld a,(s+State.py)
+        cp 192
+        jr nc,.gone
+.hold:  ld b,16
+.pause: push bc
         call vblank
         call music_tick
-        ld a,20
-        sub b
-        sra a
-        sra a
+        pop bc
+        djnz .pause
+        ; NES death velocity -4.00, gravity $28/256, terminal speed +4.
+        ; D:E is velocity and C is subpixel Y; keep the signed Y page until
+        ; Mario has actually crossed the bottom (never wrap back to the top).
+        ld de,$fc00
+        ld c,0
+.arc:   ld a,c
+        add a,e
         ld c,a
         ld hl,s+State.py
-        add a,(hl)
+        ld a,(hl)
+        adc a,d
         ld (hl),a
-        ; Track the signed world page during the death arc, too.
-        bit 7,c
-        jr z,.descending
-        jr c,.sprite
-        ld a,1
-        jr .page
-.descending:jr nc,.sprite
-        xor a
-.page:  ld (s+State.above),a
-.sprite:call draw_sprites
+        ld hl,s+State.above
+        bit 7,d
+        jr z,.down
+        jr c,.step
+        ld (hl),1
+        jr .step
+.down:  jr nc,.page
+        ld (hl),0
+.page:  bit 0,(hl)
+        jr nz,.step
+        cp 192
+        jr nc,.hide
+.step:  ld a,d
+        cp 4
+        jr z,.draw
+        ld a,e
+        add a,$28
+        ld e,a
+        ld a,d
+        adc a,0
+        ld d,a
+.draw:  push bc
+        push de
+        call vblank
+        call music_tick
+        call draw_sprites
+        pop de
         pop bc
-        djnz .death
+        jr .arc
+.hide:  call draw_sprites
+.gone:  call finish_song        ; even the last life gets the complete death cue
+        ld hl,s+State.lives
+        dec (hl)
         call time_up_card
+        ld a,(s+State.lives)
+        or a
+        jr z,.over
         call checkpoint
         ld a,(s+State.scroll+1)
         cp (hl)
-        jr c,.life
+        ld a,0
+        jr c,.retry
         ld a,(hl)
-        ld (s+State.retry),a
-.life:  ld hl,s+State.lives
-        dec (hl)
-        jr nz,.retry
+.retry: ld (s+State.retry),a
+        call lives_card
+        jp restart.resume
+.over:  ld a,4
+        ld (s+State.scene),a
         ld a,6
         call start_music
         ld de,over_text
-        call banner
+        call message_card
+        ; GameOverInter sets ScreenTimer to $12 (18 * 21 video frames).
+        ld bc,378
+        call banner.wait
         jp title
-.retry: call finish_song
-        call lives_card
-        jp restart.resume
 finish_area:
         ld a,(s+State.bonus)
         or a
@@ -832,7 +883,7 @@ clear_stage:
 .next:  call finish_song
         jp restart
 banner: call message_card
-        ld b,240
+        ld bc,240
 .wait:  push bc
         call vblank
         call music_tick
@@ -841,9 +892,12 @@ banner: call message_card
         and $30
         pop bc
         ret nz
-        djnz .wait
+        dec bc
+        ld a,b
+        or c
+        jr nz,.wait
         ret
-over_text: db '     GAME OVER     ',0
+over_text: db '      GAME OVER',0
 win_text: db ' PEACH IS RESCUED  ',0
 
         include "intermission.asm"

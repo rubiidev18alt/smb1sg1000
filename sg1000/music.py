@@ -1,6 +1,7 @@
 """Compile the vanilla SMB score into independently timed PSG parts.
 
-One duration byte (high bit set) is shared by successive notes. Identical
+One length-table index (high bit set) is shared by successive notes.
+Area tracks use the next NES length row once the hurry-up cue has played. Identical
 parts share ROM, including the noise ostinatos in the overworld phrases.
 """
 
@@ -47,11 +48,13 @@ def compile_music(root, out):
         ["WinCastleMusHdr"],
         ["VictoryMusHdr"],
         ["GroundLevelLeadInHdr"],  # non-looping pipe entrance
+        ["TimeRunningOutHdr"],
     ]
     parts = {}
     asm = ["song_list: dw " + ",".join(f"song{i}" for i in range(len(songs)))]
     freq = blob[labels["FreqRegLookupTbl"] : labels["MusicLengthLookupTbl"]]
     lens = blob[labels["MusicLengthLookupTbl"] :]
+    asm.append("note_lengths: db " + ",".join(map(str, lens[:48])))
     for i, song in enumerate(songs):
         asm += [
             f"song{i}: dw "
@@ -61,6 +64,8 @@ def compile_music(root, out):
         ]
     for hdr in sorted({hdr for song in songs for hdr in song}):
         tempo, base, offset = headers[hdr]
+        if hdr == "TimeRunningOutHdr":
+            tempo += 8  # event itself uses the faster NES duration row
         tri, sq = offset[:2]
         noise = offset[2] if len(offset) > 2 and hdr != "DeathMusHdr" else 0
         end = 65535
@@ -68,8 +73,8 @@ def compile_music(root, out):
         for ch, off in enumerate([0, sq, tri, noise]):
             p = start = labels[base] + off
             t = 0
-            duration = 1
-            last = 0
+            length = tempo
+            last = None
             stream = []
             while t < end and (ch in (0, 2) or off):
                 n = blob[p]
@@ -78,7 +83,7 @@ def compile_music(root, out):
                     if not n:
                         break
                     if n & 128:
-                        duration = lens[tempo + (n & 7)]
+                        length = tempo + (n & 7)
                         continue
                     note = n // 2
                 else:
@@ -86,13 +91,13 @@ def compile_music(root, out):
                         if ch == 3:
                             p = start
                         continue
-                    duration = lens[tempo + ((n & 1) * 4 + (n >> 6))]
+                    length = tempo + ((n & 1) * 4 + (n >> 6))
                     note = (n & 62) // 2 if ch == 1 else (n >> 4) & 3
-                if duration != last:
-                    stream.append(128 + duration)
-                    last = duration
+                if length != last:
+                    stream.append(128 + length)
+                    last = length
                 stream.append(note + 1)
-                t += duration
+                t += lens[length]
             if ch == 0:
                 end = t
             stream.append(0)

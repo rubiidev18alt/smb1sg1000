@@ -155,15 +155,15 @@ message_card:
         jp flip
 
 time_up_card:
-        ld a,(s+State.hundred)
+        ld hl,s+State.expired
+        ld a,(hl)
         or a
-        ret nz
-        ld a,(s+State.timer)
-        or a
-        ret nz
-        call finish_song
+        ret z
+        ld (hl),0               ; DisplayTimeUp consumes the flag exactly once
+        ld a,3
+        ld (s+State.scene),a
         ld de,timeup_text
         call message_card
-        ld b,90
+        ld b,147                ; ScreenTimer 7 interval ticks
         jp lives_card.hold_wait
 timeup_text: db '       TIME UP',0

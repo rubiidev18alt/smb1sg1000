@@ -3,8 +3,32 @@
 score equ $c230
 playlist equ score+16
 playing equ playlist+2
+length_offset equ playing+1
+; Event tracks are finite. Only the warning can end inside the play loop.
+gameplay_music:
+        call music_tick
+        ld a,(playing)
+        or a
+        ret nz
+        ld hl,(s+State.star)
+        ld a,h
+        or l
+        ld a,4
+        jr nz,start_music
+        ld a,(s+State.kind)
 start_music:
-        push af
+        ld b,0
+        cp 5
+        jr nc,.tempo
+        ld c,a
+        ld a,(s+State.hundred)
+        or a
+        jr nz,.normal
+        ld b,8                  ; NoteLengthTblAdder after the hurry-up cue
+.normal:ld a,c
+.tempo: push af
+        ld a,b
+        ld (length_offset),a
         call silence
         pop af
         add a,a
@@ -68,6 +92,16 @@ music_tick:
         bit 7,a
         jr z,.note
         and 127
+        ld e,a
+        ld a,(length_offset)
+        add a,e
+        ld e,a
+        ld d,0
+        push hl
+        ld hl,note_lengths
+        add hl,de
+        ld a,(hl)
+        pop hl
         ld (ix+3),a
         ld a,(hl)
         inc hl

@@ -292,23 +292,65 @@ assert (
     and 64 <= ram[p + 2] <= 67
 )
 assert audible_batches > 100
+# Running off the opening of 1-3 must not bounce Mario back out of the pit.
+core.retro_reset()
+select(2)
+for _ in range(250):
+    frame(1, 7, 8)
+    if st("forced") == 10:
+        break
+assert st("forced") == 10 and st("py") >= 192
+for _ in range(250):
+    if st("lives") != 3:
+        break
+    assert st("py") >= 192 and not st("expired")
+    frame(1)
+assert st("lives") == 2
+wait_entry(2, retry=True)
+
 core.retro_reset()
 select()
-for lives in (2, 1, 0):
+for lives in (2, 1):
     for _ in range(600):
         frame(1, 7, 8)
         if st("lives") == lives:
             break
     assert st("lives") == lives
-    if lives:
-        wait_entry(0, retry=True)
-    else:
-        frame(20)
-        frame(3, 0)
-        frame(45)
+    wait_entry(0, retry=True)
+
+# Let the real clock expire from spawn on the last life. No RAM injection.
+p = symbols["playlist"] - 0xC000
+seen_warning = seen_fast = False
+zero_frames = 0
+for _ in range(10000):
+    frame(1)
+    if st("expired"):
+        break
+    if not st("hundred"):
+        seen_warning |= ram[p] + 256 * ram[p + 1] == symbols["song11"] + 2
+        seen_fast |= seen_warning and ram[symbols["length_offset"] - 0xC000] == 8
+        zero_frames += st("timer") == 0
+assert seen_warning and seen_fast and zero_frames == 24 and st("expired")
+assert st("lives") == 1 and st("forced") == 10
+x = scroll() + st("px")
+arc = []
+for _ in range(250):
+    if st("scene") == 3:
+        break
+    assert scroll() + st("px") == x and st("forced") == 10
+    arc.append(st("py"))
+    frame(1, 7, 0)  # cannot steer or skip the death animation
+assert arc[:16] == [160] * 16 and min(arc) == 106 and arc[-1] >= 192
+assert st("scene") == 3 and not st("lives") and not st("expired")
+frame(100)
+assert st("scene") == 3  # TIME UP holds even on the last life
+frame(70)
+assert st("scene") == 4 and ram[p] + 256 * ram[p + 1] == symbols["song6"] + 2
+frame(3, 0)
+frame(45)
 assert st("lives") == 3 and st("stage") == 0
 assert video_sizes == {(256, 192)}
 core.retro_deinit()
 print(
-    f"PASS: {video_frames} frames; 1-1 Starman and bonus routes, 1-2 roof to world 2, 1-3 moving lifts, 2-1 spawn, 2-2 and 7-2 swims, 2-4 castle clear, 5-2 spring and offscreen return, 6-2 four-block standing jump, lives cards and pipe intros, music, selector wrap and restart"
+    f"PASS: {video_frames} frames; 1-1 Starman and bonus routes, 1-2 roof to world 2, 1-3 moving lifts, 2-1 spawn, 2-2 and 7-2 swims, 2-4 castle clear, 5-2 spring and offscreen return, 6-2 four-block standing jump, lives cards and pipe intros, music, selector wrap, pit death, hurry-up and last-life timeout"
 )

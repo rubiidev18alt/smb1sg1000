@@ -238,16 +238,24 @@ clock:  ld hl,s+State.divider
         dec (hl)
         ret nz
         ld (hl),24
+        ; RunGameTimer tests the displayed digits *before* decrementing:
+        ; 100 -> warning and 099, 001 -> visible 000, next tick -> time up.
         ld a,(s+State.timer)
-        sub 1
+        or a
+        jr nz,.subtract
+        ld a,(s+State.hundred)
+        or a
+        jp z,expired
+        dec a
+        jr nz,.borrow
+        ld a,11
+        call start_music
+.borrow:ld hl,s+State.hundred
+        dec (hl)
+        xor a
+.subtract:sub 1
         daa
         ld (s+State.timer),a
-        jr nc,.test
-        ld hl,s+State.hundred
-        dec (hl)
-.test:  ld hl,s+State.hundred
-        or (hl)
-        jp z,died
         jp mark
 
 draw_sprites:call prepare_sprites
