@@ -60,7 +60,6 @@ star    word
 lastpose byte
 forced  byte                    ; pose override + 1 (death, climb, growth)
 throwing byte
-debug5  byte
 walkphase byte
 starvel byte
 animcount byte
@@ -68,6 +67,8 @@ yview   byte
 tall    byte
 morph   byte
 duck    byte
+satpage byte                    ; 0 or 4: SAT at $1b00 or $1f00
+posetab byte                    ; 0 or 104: active pose pattern base
         ends
 s       equ $c100
         struct Actor
@@ -182,7 +183,6 @@ input:  in a,(PAD)
 title:  call silence
         xor a
         ld (s+State.stage),a
-        ld (s+State.debug5),a
         ld (s+State.retry),a
         ld (s+State.scorelo),a
         ld (s+State.scorehi),a
@@ -195,7 +195,7 @@ title:  call silence
         call load_stage
         call redraw
         call hud
-        ld hl,$1845
+        ld hl,$1865
         ld de,logo
         ld b,11
 .sign:  push bc
@@ -224,45 +224,29 @@ title:  call silence
         call input
 .select:call selector_label
 .wait:  call vblank
+        call music_tick
         call input
         ld a,(s+State.edge)
         bit 4,a
         jr nz,restart
         bit 5,a
         jr z,.wait
-        ld a,(s+State.debug5)
-        or a
-        jr nz,.next_world
-        ld a,(s+State.stage)
-        and 3
-        cp 3
-        jr nz,.increment
-        ld a,1
-        ld (s+State.debug5),a
-        jr .select
-.next_world:xor a
-        ld (s+State.debug5),a
 .increment:ld a,(s+State.stage)
         inc a
         and 31
         ld (s+State.stage),a
         jr .select
 restart:call load_stage
-        ld a,(s+State.debug5)
-        or a
-        jr z,play
-        ld a,1
-        ld (s+State.bonus),a
-        ld hl,bonus_room0
-        call load_area
-play:   call vblank
+play:   call prepare_sprites
+        call vblank
+        call reveal_sprites
         ld a,(s+State.ready)
         or a
         call nz,flip
-        call draw_sprites
         call input
         ld hl,s+State.tick
         inc (hl)
+        call music_tick
         call pulse_tiles
         call anim_tick
         call clock
@@ -275,15 +259,15 @@ play:   call vblank
         jr nz,.y_done
         ld a,(s+State.py)
         cp 32
-        ld a,8
+        ld a,16
         jr nc,.above_test
-        ld a,32
+        ld a,40
 .above_test:ld b,a
         ld a,(s+State.above)
         or a
         ld a,b
         jr z,.y_set
-        ld a,32
+        ld a,40
 .y_set: ld hl,s+State.yview
         cp (hl)
         jr z,.y_done
@@ -396,12 +380,17 @@ load_area:
         ld de,s+State.nextcol
         ld bc,9                 ; column list, spawn list, goal X, environment
         ldir
-        ld a,(s+State.kind)
+        ld a,(s+State.bonus)
+        or a
+        ld a,1
+        jr nz,.backdrop
+        ld a,(s+State.stage)
         ld e,a
         ld d,0
-        ld hl,sky
+        ld hl,stage_sky
         add hl,de
         ld a,(hl)
+.backdrop:
         out (CTRL),a
         ld a,$87
         out (CTRL),a
@@ -467,10 +456,11 @@ load_area:
         ld hl,sprites+184*8
 .upload:ld de,256
         call transfer
+        ld a,(s+State.kind)
+        call start_music
         ld a,1
         ld (s+State.dirty),a
         ret
-sky:    db 4,5,1,1
 unpack: push bc
         ld c,(hl)
         inc hl
@@ -654,6 +644,7 @@ slide_pole:
         ld (s+State.forced),a
         ld b,56
 .slide: push bc
+        call music_tick
         ld a,b
         rrca
         rrca
@@ -680,6 +671,7 @@ slide_pole:
         ld (s+State.forced),a
         ld b,64
 .walk:  push bc
+        call music_tick
         call vblank
         ld hl,s+State.px
         inc (hl)
@@ -716,11 +708,14 @@ died:   ld sp,$c400             ; also reachable from nested actor collision
         ld (s+State.immune),a
         ld (s+State.star),a
         ld (s+State.star+1),a
+        ld a,5
+        call start_music
         ld a,10
         ld (s+State.forced),a
         ld b,40
 .death: push bc
         call vblank
+        call music_tick
         ld a,20
         sub b
         sra a
@@ -741,19 +736,15 @@ died:   ld sp,$c400             ; also reachable from nested actor collision
         dec (hl)
         ld de,lost_text
         jr nz,.retry
+        ld a,6
+        call start_music
         ld de,over_text
         call banner
         jp title
 .retry: call banner
         jp restart
 finish_area:
-        ld a,(s+State.debug5)
-        or a
-        jr z,.main
-        xor a
-        ld (s+State.debug5),a
-        jr clear_stage
-.main:        ld a,(s+State.bonus)
+        ld a,(s+State.bonus)
         or a
         jr z,clear_stage
         xor a
@@ -767,6 +758,12 @@ finish_area:
         ld (s+State.py),a
         jp play
 clear_stage:
+        ld a,(s+State.kind)
+        cp 3
+        ld a,7
+        jr nz,.tune
+        inc a
+.tune:  call start_music
         xor a
         ld (s+State.retry),a
         ld a,(s+State.kind)
@@ -780,6 +777,8 @@ clear_stage:
         cp 32
         ld de,clear_text
         jr c,.next
+        ld a,9
+        call start_music
         ld de,win_text
         call banner
         jp title
@@ -796,10 +795,12 @@ banner: push de
         call vblank
         call flip
 .release:call vblank
+        call music_tick
         call input
         and $30
         jr nz,.release
 .press: call vblank
+        call music_tick
         call input
         and $30
         jr z,.press
@@ -809,6 +810,7 @@ over_text: db '     GAME OVER     ',0
 clear_text: db '   COURSE CLEAR    ',0
 win_text: db ' PEACH IS RESCUED  ',0
 
+        include "music.asm"
 pulse_colors: incbin "../build/sg1000/pulse.bin"
 logo:   incbin "../build/sg1000/title.bin"
 patterns: incbin "../build/sg1000/patterns.bin"

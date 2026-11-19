@@ -200,8 +200,32 @@ hazard_sprite:
 
 ; Outdoors the eight boss patterns are replaced by Lakitu, Bill, Spiny,
 ; and Hammer Brother. Slot pressure naturally limits simultaneous attacks.
-special_art: db 168,8, 200,8, 192,1, 208,12, 184,12, 240,8
+special_art: db 168,8, 200,8, 192,1, 208,12, 184,12, 240,8, 128,8
+; Rise/fall samples are symmetric around the apex. The object keeps its
+; source X rather than drifting toward Mario with the flying-enemy path.
+bubble_y: db 190,176,163,150,139,128,118,109,101,94,87,82,77,74,71,70,69
 special_actor:
+        cp 13
+        jr nz,.other
+        inc (ix+Actor.dir)
+        ld a,(ix+Actor.dir)
+        srl a
+        and 63
+        cp 33
+        ld b,190
+        jr nc,.bubble_y
+        cp 17
+        jr c,.index
+        neg
+        add a,32
+.index: ld e,a
+        ld d,0
+        ld hl,bubble_y
+        add hl,de
+        ld b,(hl)
+.bubble_y:ld (ix+Actor.y),b
+        jp walker.touch
+.other:
         cp 8
         jp z,walker.normal
         cp 10

@@ -23,6 +23,7 @@ if len(sys.argv) != 2:
 core = C.CDLL(sys.argv[1])
 callbacks = []
 buttons = ()
+audible_batches = 0
 video_frames = 0
 video_sizes = set()
 
@@ -40,6 +41,9 @@ def video(data, width, height, pitch):
 
 
 def audio(data, count):
+    global audible_batches
+    if any(C.string_at(data, count * 4)):
+        audible_batches += 1
     return count
 
 
@@ -115,6 +119,11 @@ def run_tape(name):
                 and ram[(st("px") + 8) & 0xF0] == 0x52
             ):
                 flags.add("roof")
+            if name == "castle-2-4":
+                for i in (0, 5):
+                    p = symbols["actors"] - 0xC000 + i
+                    if ram[p]:
+                        flags.add(ram[p + 4])
             count = ram[symbols["liftcount"] - 0xC000]
             for i in range(count):
                 p = symbols["liftbuf"] - 0xC000 + i * 5
@@ -150,20 +159,35 @@ select(2)
 _, riding = run_tape("lifts-1-3")
 assert st("stage") == 3 and riding >= 10
 core.retro_reset()
+select(7)
+flags, _ = run_tape("castle-2-4")
+assert {13, 6, 5} <= flags and st("stage") == 8  # Podoboo, firebar, Bowser
+core.retro_reset()
 frame(120)
-for i in range(1, 41):
+for i in range(1, 33):
     frame(4, 8)
     frame(3)
-    world, level = divmod(i % 40, 5)
-    assert st("stage") == world * 4 + min(level, 3) and bool(st("debug5")) == (
-        level == 4
-    )
+    assert st("stage") == i % 32
 for _ in range(4):
     frame(3, 8)
     frame(2)
 frame(3, 0)
 frame(25)
-assert st("bonus") and st("kind") == 2
+assert st("stage") == 4 and not st("bonus") and st("kind") == 1
+# The first source enemy of 2-1 is at column $18, row 5. Observe it
+# on its allocation tick, before walking/gravity have carried it far.
+p = symbols["actors"] - 0xC000
+for _ in range(230):
+    frame(1, 7, 8)
+    if ram[p]:
+        break
+assert (
+    ram[p]
+    and ram[p + 4] == 0
+    and 383 <= scroll() + ram[p + 1] <= 384
+    and 64 <= ram[p + 2] <= 67
+)
+assert audible_batches > 100
 core.retro_reset()
 select()
 for lives in (2, 1, 0):
@@ -179,5 +203,5 @@ assert st("lives") == 3 and st("stage") == 0
 assert video_sizes == {(256, 192)}
 core.retro_deinit()
 print(
-    f"PASS: {video_frames} frames; 1-1 Starman and bonus routes, 1-2 roof to world 2, 1-3 moving lifts, selector wrap and restart"
+    f"PASS: {video_frames} frames; 1-1 Starman and bonus routes, 1-2 roof to world 2, 1-3 moving lifts, 2-1 spawn, 2-4 castle clear, music, selector wrap and restart"
 )

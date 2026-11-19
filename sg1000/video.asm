@@ -17,31 +17,32 @@ flip:   ld a,(s+State.back)
         ld (s+State.dirty),a
         ld (s+State.ready),a
         ret
-redraw: ld hl,$1800
+redraw: ; Reserve one blank overscan row plus two HUD rows. Do not draw
+        ; the first 96 world tiles only to overwrite them immediately.
+        ld hl,$1860
         call back_address
-        ld a,(s+State.yview)    ; pixel offset, always a multiple of 8
+        ld a,(s+State.yview)
         rrca
         rrca
         rrca
+        ld b,a
+        ld a,3
+        sub b
+        ld ixh,21
+        jr nc,.start
+        neg
         ld c,a
-        or a
-        jr z,.world
 .clear_row:ld b,32
         ld a,36
 .clear: out (VDP),a
         nop
         nop
         djnz .clear
+        dec ixh
         dec c
         jr nz,.clear_row
-.world: ld ixl,0
-        ld a,(s+State.yview)
-        rrca
-        rrca
-        rrca
-        neg
-        add a,24
-        ld ixh,a
+        xor a
+.start: ld ixl,a
 .row:   ld a,ixl
         srl a
         ld c,a
@@ -128,22 +129,22 @@ text:   call back_address
         jr .char
 hud:    ld hl,$1800
         call back_address
-        ld b,64
+        ld b,96
         ld a,36
 .clear: out (VDP),a
         nop
         nop
         djnz .clear
-        ld hl,$1802
+        ld hl,$1822
         ld de,hud_score
         call text
-        ld hl,$1812
+        ld hl,$1832
         ld de,hud_world
         call text
-        ld hl,$181a
+        ld hl,$183a
         ld de,hud_time
         call text
-        ld hl,$1822
+        ld hl,$1842
         call back_address
         ld a,(s+State.scorehi)
         call digits
@@ -151,7 +152,7 @@ hud:    ld hl,$1800
         call digits
         xor a
         call digits
-        ld hl,$182b
+        ld hl,$184b
         call back_address
         ld a,HUD_COIN
         out (VDP),a
@@ -162,10 +163,10 @@ hud:    ld hl,$1800
         out (VDP),a
         ld a,(s+State.coins)
         call digits
-        ld hl,$1833
+        ld hl,$1853
         call back_address
         call stage_digits
-        ld hl,$183b
+        ld hl,$185b
         call back_address
         ld a,(s+State.hundred)
         out (VDP),a
@@ -179,7 +180,7 @@ selector_label:
         ld de,select_prompt
         call text
         call stage_digits
-        ld hl,$1833
+        ld hl,$1853
         call back_address
         call stage_digits
         ld a,(s+State.back)
@@ -199,10 +200,6 @@ stage_digits:
         nop
         nop
         out (VDP),a
-        ld a,(s+State.debug5)
-        or a
-        ld a,5
-        jr nz,.write
         ld a,(s+State.stage)
         and 3
         inc a
@@ -249,7 +246,16 @@ clock:  ld hl,s+State.divider
         jp z,died
         jp mark
 
-draw_sprites:
+draw_sprites:call prepare_sprites
+reveal_sprites:
+        ld a,(s+State.satpage)
+        add a,a
+        or $36
+        out (CTRL),a
+        ld a,$85
+        out (CTRL),a
+        ret
+prepare_sprites:
         call animate_mario
         ld hl,sat
         ld a,(s+State.immune)
@@ -260,19 +266,24 @@ draw_sprites:
         ld a,(s+State.py)
         dec a
         ld e,a
-        ld c,12                 ; bottom is uploaded to patterns 12..23
+        ld a,(s+State.posetab)
+        add a,12
+        ld c,a
         ld a,(s+State.tall)
         or a
         jr z,.player
         ld a,e
         sub 16
         ld e,a
-        ld c,0
+        ld a,(s+State.posetab)
+        ld c,a
         call player_layers
         ld a,e
         add a,16
         ld e,a
-        ld c,12
+        ld a,(s+State.posetab)
+        add a,12
+        ld c,a
 .player:call player_layers
 .others:call lift_sprites
         ld ix,actors
@@ -318,12 +329,22 @@ draw_sprites:
         ld de,sat
         or a
         sbc hl,de
-        push hl
-        ld hl,$1b00
+        ld b,l
+        ld a,(s+State.satpage)
+        xor 4
+        ld (s+State.satpage),a
+        or $1b
+        ld h,a
+        ld l,0
         call address
-        pop de
         ld hl,sat
-        jp transfer
+; Active-display transfers must leave at least 29 T-states between writes.
+short_upload:
+        ld c,VDP
+.copy:  outi
+        nop
+        jp nz,.copy
+        ret
 player_layers:
         ld b,8                  ; fire suit substitutes white for cap/overalls
         ld a,(s+State.big)
@@ -405,7 +426,13 @@ enemy_sprite:
         ld b,(hl)
         pop hl
         ld a,c
-        cp 240
+        cp 128
+        jr nz,.special
+        bit 5,(ix+Actor.dir)
+        jr z,.pair
+        ld c,136
+        jr .pair
+.special:cp 240
         jp z,layer
         jp .pair
 .ordinary:cp 5

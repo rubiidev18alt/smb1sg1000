@@ -81,24 +81,29 @@ animate_mario:
         ld d,(hl)
         inc hl
         push hl
+        ld a,(s+State.posetab)
+        xor 104                 ; other 24-pattern pose slot
+        ld (s+State.posetab),a
         ld a,d
         or e
         ld (s+State.tall),a
         jr z,.bottom
         ld hl,$3800
-        call address
-        ex de,hl
-        ld de,96
-        call transfer
+        call .upload
 .bottom:pop hl
         ld e,(hl)
         inc hl
         ld d,(hl)
         ld hl,$3860
-        call address
+.upload:ld a,(s+State.posetab)
+        or a
+        jr z,.addr
+        ld bc,104*8
+        add hl,bc
+.addr:  call address
         ex de,hl
-        ld de,96
-        jp transfer
+        ld b,96
+        jp short_upload
 
 anim_tick:
         ld hl,s+State.morph
@@ -118,6 +123,11 @@ anim_tick:
         jr z,.gait
         dec hl
         ld (s+State.star),hl
+        ld a,h
+        or l
+        jr nz,.gait
+        ld a,(s+State.kind)
+        call start_music
 .gait:  ld hl,s+State.animcount
         ld a,(hl)
         or a

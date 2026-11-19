@@ -12,7 +12,7 @@ class CartridgeTest(unittest.TestCase):
         self.assertEqual(cols[28][9:12], [0x12, 0x14, 0x54])
         self.assertEqual(cols[101][7], 0x57)  # Starman brick
         self.assertEqual(cols[69][11], 0)  # first pit
-        self.assertIn((22, 10, 0), enemies)
+        self.assertIn((22 * 16, 10, 0), enemies)
         self.assertEqual((goal, cols[goal][1]), (198, 0x24))
         self.assertIn((57, 0, 163, 9), bonus_routes("GroundArea6", 0x25, 0))
 
@@ -21,6 +21,24 @@ class CartridgeTest(unittest.TestCase):
         commands = list(objects([0x0F, 3, 0x1E, 0xC2, 2, 0x6B, 6, 0xFF], True, links))
         self.assertEqual(links, [(49, 0x42, 2)])
         self.assertEqual(commands, [(54, 11, 6)])
+
+    def test_later_worlds(self):
+        # Row F with the advance bit isn't an explicit page reload.
+        stream = [0x0F, 7, 0x7B, 0x43, 0xC6, 0xD0, 0x0F, 0x8A, 0xC8, 0x50, 255]
+        self.assertEqual(list(objects(stream, True))[-1], (9 * 16 + 12, 8, 0x50))
+        _, _, enemies = area("GroundArea9", 1)
+        self.assertIn((672, 10, 0), enemies)
+        self.assertIn((696, 10, 0), enemies)  # 24-pixel group spacing
+        cols, _, enemies = area("CastleArea3", 3)
+        self.assertIn((256, 11, 13), enemies)
+        self.assertIn((320, 11, 256 + 13), enemies)  # hard-only on revisiting as 5-4
+        self.assertIn((2160, 6, 5), enemies)
+        self.assertIn(0x8A, {v for col in cols for v in col})
+        meta = (OUT / "meta.bin").read_bytes()
+        colors = (OUT / "colors.bin").read_bytes()
+        body = meta[0x8B] * 8
+        self.assertTrue(all(b == 0x88 for b in colors[body : body + 8]))
+        self.assertNotEqual(meta[0x8B], meta[0x87])  # overworld water stays blue
 
     def test_rom_tables(self):
         import re
@@ -42,6 +60,8 @@ class CartridgeTest(unittest.TestCase):
         for world in range(1, 9):
             stages.extend(v for v in table(f"World{world}Areas", common) if v != 0x29)
         self.assertEqual(len(stages), 32)
+        skies = symbols["stage_sky"]
+        self.assertEqual((rom[skies + 4], rom[skies + 8]), (5, 1))  # 2-1 day, 3-1 night
         for i, v in enumerate(stages):
             k = (v >> 5) & 3
             name = (

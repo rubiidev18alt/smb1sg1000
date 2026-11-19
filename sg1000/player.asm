@@ -332,6 +332,8 @@ move_y: ld a,(s+State.edge)
         cp $51
         jr z,.brick
         cp $52
+        jr z,.brick
+        cp $8c
         jr nz,.stop
 .brick:
         ld a,(s+State.big)
@@ -381,6 +383,10 @@ collect:ld a,(s+State.above)
         add a,8
         ld e,a
         call tile_at
+        cp $8a
+        jp z,died
+        cp $8b
+        jp z,died
         cp $c2
         ret nz
         ld (hl),0

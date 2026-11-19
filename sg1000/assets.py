@@ -29,10 +29,12 @@ def objects(data, enemy=False, links=None):
         i += 2
         row = a & 15
         if b & 128 and not page_selected:
+            page_selected = True
             page += 1
+        can_select = not page_selected
         page_selected = False
         b &= 127
-        if (enemy and row == 15) or (not enemy and row == 13 and b < 64):
+        if (enemy and row == 15 and can_select) or (not enemy and row == 13 and b < 64):
             page = b & 31
             page_selected = True
         elif enemy and row == 14:
@@ -175,6 +177,8 @@ def area(name, kind):
         elif y == 13 and b == 0x42:
             goal = x
             put(x, 6, 0xC5)
+        elif y == 13 and b == 0x43:
+            put(x, 7, 0x0C)  # bridge chain beneath the axe
         elif y == 13 and b == 0x44:
             for j in range(13):
                 put(x + j, 8, 0x89)
@@ -191,6 +195,15 @@ def area(name, kind):
     if goal is None:
         goal = width - 18
         put(goal, 8, 0xC5)
+    if kind == 3:
+        # The NES shares water and lava CHR and swaps the background palette.
+        # Graphics II colors are bound to a pattern, so use castle-only IDs.
+        for col in cols:
+            for row, tile in enumerate(col):
+                if tile in (0x86, 0x87):
+                    col[row] = tile + 4
+                elif tile == 0x52:
+                    col[row] = 0x8C  # castle brick uses gray mortar
     spawns = []
     for x, y, b in objs:
         if y == 13 and b in (0x48, 0x49):
@@ -203,16 +216,19 @@ def area(name, kind):
                 goal,
             )
             for xx in range(x + 4, end, 9):
-                spawns.append((xx, 10, 7 if b == 0x48 else 9))
+                spawns.append((xx * 16, 10, 7 if b == 0x48 else 9))
         elif y < 12 and b >> 4 == 1 and data[1] >> 6 == 2:
-            spawns.append((x, y, 9))  # cannon mouth
+            spawns.append((x * 16, y, 9))  # cannon mouth
 
     for x, y, b in objects(enemies, True):
+        if y == 15:
+            continue  # row-F advance, below the playable area
+        hard = (b & 64) << 2  # encoded separately from Y/style on cartridge
         b &= 63
         if 0x1B <= b <= 0x20:
-            spawns.append((x, max(0, min(y - 2, 10)), 6))  # firebar anchor
+            spawns.append((x * 16, max(0, min(y - 2, 10)), hard + 6))  # firebar anchor
         elif b == 0x11:
-            spawns.append((x, 2, 11))  # Lakitu drops Spinies from his cloud
+            spawns.append((x * 16, 2, hard + 11))  # Lakitu drops Spinies from his cloud
         elif b in (0, 1, 2, 3, 5, 6, 7, 10, 11, 0x0E, 0x0F) or 0x37 <= b <= 0x3E:
             group = b >= 0x37
             for j in range(2 + (b % 2 == 0) if group else 1):
@@ -223,16 +239,17 @@ def area(name, kind):
                     style = 10
                 spawns.append(
                     (
-                        x + j * 2,
+                        max(0, x * 16 - 48) + j * 24 if group else x * 16,
                         (6 if (b - 0x37) & 2 else 10)
                         if group
                         else max(0, min(y - 1, 10)),
-                        style,
+                        style + hard,
                     )
                 )
-    if kind == 3:
-        spawns = [e for e in spawns if e[0] < goal - 12]
-        spawns.append((goal - 6, 6, 5))
+        elif kind == 3 and b == 12:
+            spawns.append((x * 16, 11, hard + 13))  # Podoboo erupts at this X
+        elif kind == 3 and b == 0x2D:
+            spawns.append((x * 16, y - 2, 5))
     return (
         (
             cols
@@ -314,10 +331,21 @@ def graphics():
             palette = (0, 11, 10, 1)
         if idx == 0x52:
             palette = (0, 7, 4, 1)
-        if idx in (0x62, 0x89):
+        if idx in (0x86, 0x87):
+            palette = (0, 15, 4, 7)
+        if idx == 0x89:
+            palette = (0, 11, 6, 1)  # bridge timbers, not castle masonry
+        if idx == 0x62:
             palette = (0, 15, 14, 1)
         for i, j in enumerate([0, 2, 1, 3]):
             meta[i * 256 + idx] = convert(tiles[j], palette)
+        if idx == 0x52:
+            for i, j in enumerate([0, 2, 1, 3]):
+                meta[i * 256 + 0x8C] = convert(tiles[j], (0, 15, 14, 1))
+            flags[0x8C] = 1
+        if idx in (0x86, 0x87):
+            for i, j in enumerate([0, 2, 1, 3]):
+                meta[i * 256 + idx + 4] = convert(tiles[j], (0, 11, 8, 6))
         flags[idx] = int("MTILE_SOLID" in line and idx not in (0xC2, 0xC3, 0x24, 0x25))
         idx += 1
     # Add HUD punctuation without consuming another metatile palette group.
@@ -396,7 +424,13 @@ def graphics():
         sprite(sprites, misc, 0x34, False, mask)  # 88,92: star
     for mask in ((1, 3), (2,)):
         sprite(sprites, misc[0x1A * 16 : 0x1C * 16] * 2, 0, False, mask)  # girder
-    sprites.extend(bytes(144 * 8 - len(sprites)))
+    sprites.extend(bytes(128 * 8 - len(sprites)))
+    boss = (ROOT / "chr/mmc5/sprites_enemies.chr").read_bytes()[2048:]
+    bubble = boss[0x18 * 16 : 0x1A * 16]
+    pair(bubble + bytes(int(f"{b:08b}"[::-1], 2) for b in bubble), range(4))
+    # Mirror each 16-row TMS sprite column for the downward pose.
+    up = bytes(sprites[-64:])
+    sprites.extend(b"".join(up[i : i + 16][::-1] for i in range(0, 64, 16)))
     for pose in (0x30, 0x34):
         pair(enemy, range(pose, pose + 4))
     # The original shell uses the same half, mirrored on the right.
@@ -555,6 +589,9 @@ def bonus_routes(name, ident, world):
 def compile_game():
 
     OUT.mkdir(exist_ok=True, parents=True)
+    from music import compile_music
+
+    compile_music(ROOT, OUT)
     graphics()
 
     common = (ROOT / "src/common.s").read_text()
@@ -606,7 +643,10 @@ def compile_game():
                     ]
             asm += [" dw 65535", f"enemies_{name}:"]
             for x, y, style in spawns:
-                asm += [f" dw {x * 16}", f" db {y * 16 + style}"]
+                asm += [
+                    f" dw {x | (0x8000 if style & 256 else 0)}",
+                    f" db {y * 16 + (style & 15)}",
+                ]
             asm += [" dw 65535", " db 0"]
     assert len(stages) == 32
     pages = table("HalfwayPageNybbles", (ROOT / "src/player.s").read_text())
@@ -626,6 +666,28 @@ def compile_game():
         x, y = choices[0] if choices else (1, 10)
         timer = [4, 4, 3, 2][table("L_" + name)[0] >> 6]
         asm += [f" db {page},{16 * x},{16 * (y - 1)},{timer}"]
+    # NES backdrop $0f is black, $22 is sky blue; bonus rooms override it.
+    backgrounds = table("BackgroundColors", (ROOT / "src/screen_render.s").read_text())
+    skies = []
+    for name in stages:
+        kind = next(
+            i
+            for i, k in enumerate(("Water", "Ground", "Underground", "Castle"))
+            if name.startswith(k)
+        )
+        level = table("L_" + name)
+        control = level[0] & 7
+        # The opening screen is prefetched before play (e.g. 3-1 sets
+        # its night backdrop at column 6 rather than in the header).
+        for x, row, cmd in objects(level[2:]):
+            if x < 16 and row == 14 and cmd & 64 and cmd & 7 >= 4:
+                control = cmd & 7
+        skies.append(
+            1
+            if backgrounds[control if control >= 4 else kind] == 15
+            else (4 if kind == 0 else 5)
+        )
+    asm += ["stage_sky: db " + ",".join(map(str, skies))]
     asm += ["stage_list: dw " + ",".join(stages)]
     asm += ["pipe_list: dw " + ",".join(f"pipes_stage{i}" for i in range(32))]
     bonus, _, _ = area("UndergroundArea3", 2)
@@ -641,8 +703,26 @@ def compile_game():
             f"bonus_cols{room}: dw " + ",".join(f"column{i}" for i in ids),
         ]
     asm += ["empty_enemies: dw 65535"]
+    # Overlap equal suffixes/prefixes; unpack still copies 12 raw bytes.
+    pending = set(map(bytes, pool))
+    packed = bytearray()
+    while pending:
+        prefix = bytes(packed[-11:])
+        col = None
+        for size in range(len(prefix), 0, -1):
+            candidates = [c for c in pending if c.startswith(prefix[-size:])]
+            if candidates:
+                col = min(candidates)
+                break
+        if col is None:
+            col = min(pending)
+            size = 0
+        pending.remove(col)
+        packed.extend(col[size:])
     for col, i in pool.items():
-        asm += [f"column{i}: db " + ",".join(map(str, col))]
+        asm.append(f"column{i} equ column_pool+{packed.index(bytes(col))}")
+    (OUT / "columns.bin").write_bytes(packed)
+    asm.append('column_pool: incbin "columns.bin"')
     (OUT / "areas.inc").write_text("\n".join(asm) + "\n")
     print(len(areas), "distinct main areas;", len(pool), "unique columns")
 

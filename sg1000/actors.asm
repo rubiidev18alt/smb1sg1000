@@ -12,7 +12,16 @@ update_actors:
         ld b,(hl)
         inc hl
         push hl
-        ex de,hl
+        ld a,d
+        cp $ff
+        jr z,.notyet
+        bit 7,d
+        jr z,.position
+        res 7,d
+        ld a,(s+State.stage)
+        cp 18                   ; secondary hard mode starts at 5-3
+        jr c,.consume
+.position:ex de,hl
         ld de,(s+State.scroll)
         or a
         sbc hl,de
@@ -60,7 +69,7 @@ walker: ld a,(ix+Actor.active)
         ld a,(ix+Actor.style)
         or a
         cp 3
-        jr z,.star_move
+        jp z,.star_move
         or a
         jr nz,.fall
         jr .normal
@@ -79,9 +88,14 @@ walker: ld a,(ix+Actor.active)
 .run:
         ld a,(ix+Actor.dir)
         add a,(ix+Actor.x)
+        bit 7,(ix+Actor.dir)
+        jr z,.right_bound
+        jr nc,.turn             ; underflow, not a foe entering from the right
+        jr .inside
+.right_bound:jr c,.turn
         cp 241
         jr nc,.turn
-        ld b,a
+.inside:ld b,a
         ld d,a
         bit 7,(ix+Actor.dir)
         jr nz,.side
@@ -114,6 +128,7 @@ walker: ld a,(ix+Actor.active)
         cp 191
         jp nc,.remove
         djnz .drop
+        jr .touch
 .star_move:
         ld a,(ix+Actor.dir)
         add a,(ix+Actor.x)
@@ -177,7 +192,7 @@ walker: ld a,(ix+Actor.active)
         cp 8
         jp z,.hurt
         cp 12
-        jp z,.hurt
+        jp nc,.hurt
         cp 2
         jr z,.kick
         ld a,(s+State.vy)
@@ -217,6 +232,10 @@ walker: ld a,(ix+Actor.active)
 .grow:  ld a,(ix+Actor.style)
         cp 3
         jr nz,.size
+        push ix
+        ld a,4
+        call start_music
+        pop ix
         ld hl,600
         ld (s+State.star),hl
         jr .remove

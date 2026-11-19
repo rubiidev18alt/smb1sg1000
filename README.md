@@ -11,12 +11,12 @@
 | Button 2 | Hold to run; press to shoot as Fire Mario. |
 | Down | Enter a connected pipe while standing on its mouth. |
 | Button 1 on the title | Start the selected course. |
-| Button 2 on the title | Advance one level: 1–5, then the next world. After 8-5 it wraps to 1-1. Slot 5 plays a bonus room. |
+| Button 2 on the title | Advance one level: 1–4, then the next world. After 8-4 it wraps to 1-1. |
 | Either button after a life loss or clear | Continue. |
 
 The cartridge follows the **32-stage, eight-world main route** using SMB1Base’s area streams, halfway points and CHR art. Mario accelerates and brakes with fractional velocity; speed and button hold affect the jump arc. In 1-3 the girders move and carry Mario. In 1-2 you can ride an elevator above the ceiling, run over the exit and drop down to the warp pipes. The Starman bounces out of its brick and grants temporary contact invincibility.
 
-The camera now steps by **8 pixels rather than 16**. It is not pixel-smooth or frame-identical to the NES. The SG-1000 video chip has no scroll registers, permits two background colors per eight-pixel scanline, and displays only four sprites per scanline. Mario uses streamed standing, walking, skidding, jumping, swimming, crouching, throwing, climbing, transformation and death poses. The new HUD, coin colors, layered Koopas and descending flag are adapted for those limits. This revision is **silent** rather than playing incomplete music arrangements. Enemy behavior and boss fights are simplified; vine/cloud routes and castle loops are not implemented.
+The camera now steps by **8 pixels rather than 16**. It is not pixel-smooth or frame-identical to the NES. The SG-1000 video chip has no scroll registers, permits two background colors per eight-pixel scanline, and displays only four sprites per scanline. Mario uses streamed standing, walking, skidding, jumping, swimming, crouching, throwing, climbing, transformation and death poses. The new HUD, coin colors, layered Koopas and descending flag are adapted for those limits. The score uses the SN76489’s three tones for lead, harmony and bass, with short noise percussion where the source provides it. Courses, Starman, death and clear jingles have their own arrangements; gameplay sound effects are muted. Enemy behavior and boss fights are simplified; vine/cloud routes and castle loops are not implemented.
 
 ### Rebuild
 
@@ -28,9 +28,9 @@ make sg1000         # writes build/smb1.sg
 make sg1000-test    # verify the assembled ROM against the source area tables
 ```
 
-For a controller-driven emulator test, run `make sg1000-test GEARSYSTEM_CORE=/path/to/gearsystem_libretro.so`. The recorded pad inputs clear 1-1 both overland (collecting Starman) and through the bonus pipe, take the 1-2 roof to world 2, and clear 1-3 using moving lifts. The suite also checks title selection, wraparound, life loss and restart. Tested in Gearsystem; not verified on a physical console.
+For a controller-driven emulator test, run `make sg1000-test GEARSYSTEM_CORE=/path/to/gearsystem_libretro.so`. The recorded pad inputs clear 1-1 both overland (collecting Starman) and through the bonus pipe, take the 1-2 roof to world 2, and clear 1-3 using moving lifts. It also checks an enemy spawn in 2-1, clears the lava pits and Bowser bridge in 2-4, and checks audio output, title wraparound, life loss and restart. Tested in Gearsystem; not verified on a physical console.
 
-The native code is in [`sg1000/`](sg1000/). It uses 1 KiB of work RAM and 16 KiB of VRAM. Sixteen mutable columns stream from cartridge ROM. Backgrounds are composed in a hidden Graphics II name table and flipped at vertical blank; the current Mario pose is uploaded only when it changes.
+The native code is in [`sg1000/`](sg1000/). It uses 1 KiB of work RAM and 16 KiB of VRAM. Sixteen mutable columns stream from cartridge ROM. Overlapping column data share cartridge storage without runtime decompression. The renderer prepares the next name table, sprite attribute table and changed Mario pose offscreen. It switches the tables together at vertical blank during play, so a scrolling background doesn’t get a frame ahead of its sprites.
 
 ---
 
