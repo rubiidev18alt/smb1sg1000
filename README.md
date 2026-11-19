@@ -1,4 +1,36 @@
-# SMB1Base
+# Super Mario Bros. for the Sega SG-1000
+
+**[Download the playable cartridge: smb1.sg](cartridge/smb1.sg)** (48 KiB). Open the `.sg` file in Gearsystem in SG-1000 mode. No NES ROM, BIOS, or RAM expansion is needed.
+
+![Title screen captured in Gearsystem](sg1000/title.png)
+
+| Controller 1 | Action |
+| --- | --- |
+| Left / Right | Walk |
+| Button 1 | Jump; release early for a short hop. Tap to swim underwater. |
+| Button 2 | Hold to run; press to shoot as Fire Mario. |
+| Down | Enter a connected pipe while standing on its mouth. |
+| Either button | Start or continue after a life loss or course clear. |
+
+This is a native Z80 adaptation of the **32-stage, eight-world main route**. The build reads SMB1Base’s area streams, halfway points, CHR graphics, title sign and music data. The port includes underground coin rooms, mushrooms and fire flowers, shell kicks, flagpoles, castle hazards and Bowser. It is single-player and not frame-identical to the NES game: the camera advances one metatile at a time, lifts are fixed platforms, enemy patterns and boss fights are simplified, and warp zones, vine/cloud routes and castle loops are omitted.
+
+### Rebuild
+
+Use Python 3.10+, GNU Make and [SjASMPlus](https://github.com/z00m128/sjasmplus) (tested with 1.21.1):
+
+```sh
+make sg1000-tools   # optional: build a local assembler with Git and a C++ compiler
+make sg1000         # writes build/smb1.sg
+make sg1000-test    # verify the assembled ROM against the source area tables
+```
+
+For a controller-driven emulator test, run `make sg1000-test GEARSYSTEM_CORE=/path/to/gearsystem_libretro.so`. It plays 1-1 both overland and through the bonus pipe, enters 1-2, then tests life loss, game over and restart. Tested in Gearsystem; not verified on a physical console.
+
+The native code is in [`sg1000/`](sg1000/). It uses 1 KiB of work RAM and the 9918A's 16 KiB of VRAM. Only sixteen columns of the map are mutable at once; the rest stream from cartridge ROM. Backgrounds use two alternating Graphics II name tables, sprites use layered 16×16 patterns, and two PSG voices play the converted melody and bass while the third handles effects.
+
+---
+
+## Original NES project: SMB1Base
 
 ## ROM Hacking friendly version of SMB1
 

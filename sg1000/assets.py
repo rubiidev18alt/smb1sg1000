@@ -1,0 +1,512 @@
+"""Compile SMB1Base's ca65 area streams and NES CHR into SG cartridge data."""
+
+import re
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+OUT = ROOT / "build/sg1000"
+SOURCE = (ROOT / "src/level_tiles.s").read_text()
+
+
+def table(name, source=SOURCE):
+    body = re.search(
+        r"^" + name + r":([^\n]*(?:\n(?:\s*\.byte[^\n]*|;[^\n]*))*)",
+        source,
+        re.MULTILINE,
+    )[1]
+    return [
+        int(v[1:], 16 if v[0] == "$" else 2)
+        for line in body.splitlines()
+        for v in re.findall(r"\$[\da-fA-F]+|%[01]+", line.split(";")[0])
+    ]
+
+
+def objects(data, enemy=False, links=None):
+    page = i = 0
+    while data[i] != (255 if enemy else 253):
+        a, b = data[i : i + 2]
+        i += 2
+        row = a & 15
+        if b & 128:
+            page += 1
+        b &= 127
+        if (enemy and row == 15) or (not enemy and row == 13 and b < 64):
+            page = b & 31
+        elif enemy and row == 14:
+            if links is not None:
+                links.append((page * 16 + (a >> 4), b, data[i]))
+            i += 1  # area link includes an entrance byte
+        else:
+            yield page * 16 + (a >> 4), row, b
+
+
+def area(name, kind):
+    data = table("L_" + name)
+    # Some vanilla enemy streams share a terminator with the next labeled area.
+    enemies = table("E_" + name) + [255]
+    objs = list(objects(data[2:]))
+    width = max(x for x, _, _ in objs) + 20
+    cols = [[0] * 12 for _ in range(width)]
+
+    def put(x, y, tile):
+        if 0 <= y < 12 and 0 <= x < width:
+            cols[x][y] = tile
+
+    foreground = data[0] & 7
+    fore_tiles = table("ForeSceneryData")
+    fore_at = {x: b & 7 for x, y, b in objs if y == 14 and b & 64}
+    terr = table("TerrainRenderBits")
+    scene = table("BackSceneryData")
+    mts = table("BackSceneryMetatiles")
+    header = data[1]
+    changes = {x: b for x, y, b in objs if y == 14 and b < 64}
+    for x, col in enumerate(cols):
+        header = changes.get(x, header)
+        scenery = header >> 4 & 3
+        if scenery:
+            s = scene[(scenery - 1) * 48 + x % 48]
+            if s:
+                for j in range(3):
+                    put(x, (s >> 4) + j, mts[3 * ((s & 15) - 1) + j])
+        foreground = fore_at.get(x, foreground)
+        if 1 <= foreground <= 3:
+            for y in range(12):
+                tile = fore_tiles[(foreground - 1) * 13 + y]
+                if tile:
+                    col[y] = tile
+        k = 2 * (header & 15)
+        for y in range(12):
+            if terr[k + y // 8] & 1 << (y % 8):
+                col[y] = [0x69, 0x54, 0x52, 0x62][kind]
+    goal = None
+    for x, y, b in objs:
+        op, n = b >> 4, (b & 15) + 1
+        if y < 12:
+            if op == 0:
+                if kind == 0 and b == 9:
+                    goal = x
+                    put(x, y + 1, 0x6C)
+                put(
+                    x,
+                    y,
+                    [
+                        0xC1,
+                        0xC0,
+                        0xC0,
+                        0xC1,
+                        0x55,
+                        0x55,
+                        0x55,
+                        0x58,
+                        0x55,
+                        0x6B,
+                        0xC4,
+                        0x68,
+                        0,
+                        0,
+                        0,
+                        0,
+                    ][b],
+                )
+            elif op == 7:
+                for j in range(2):
+                    put(x + j, y, (0x10 if b & 8 else 0x12) + j)
+                    for k in range(1, (b & 7) + 1):
+                        put(x + j, y + k, 0x14 + j)
+            elif op == 1 and data[1] >> 6 == 2:
+                for j in range(n):
+                    put(x, y + j, min(0x66, 0x64 + j))
+            else:
+                brick = [0x22, 0x51, 0x52, 0x52][kind]
+                stone = [0x69, 0x61, 0x61, 0x62][kind]
+                tile = [0, 0x17, brick, stone, 0xC2, brick, stone][op]
+                for j in range(n):
+                    xx, yy = (x, y + j) if op in (5, 6) else (x + j, y)
+                    put(
+                        xx,
+                        yy,
+                        tile
+                        if op != 1
+                        else (0x19 if data[1] >> 6 == 1 else 0x16)
+                        + (0 if j == 0 else 2 if j == n - 1 else 1),
+                    )
+                    if op == 1 and j == n // 2:
+                        for k in range(y + 1, 11):
+                            put(xx, k, 0x4C)
+        elif y == 12:
+            for xx in range(x, x + n):
+                if op in (0, 5):
+                    for k in range(8, 12):
+                        put(
+                            xx,
+                            k,
+                            0x86
+                            if op == 5 and k == 10
+                            else 0x87
+                            if op == 5 and k == 11
+                            else 0,
+                        )
+                elif op in (2, 3, 4):
+                    yy = [6, 7, 9][op - 2]
+                    put(xx, yy, 11)
+                    put(xx, yy + 1, 0x63)
+                elif op in (6, 7):
+                    put(xx, 3 if op == 6 else 7, 0xC0)
+        elif y == 15 and op == 3:
+            for j in range(n):
+                for yy in range(max(3, 10 - j), 11):
+                    put(x + j, yy, 0x61)
+        elif y == 15 and op == 2:
+            castle = table("CastleMetatiles")
+            for yy in range(b & 15, 11):
+                for j in range(5):
+                    put(x + j, yy, castle[(yy - (b & 15)) * 5 + j])
+        elif (y, b) == (13, 0x41) or (y == 15 and op == 5):
+            goal = x
+            for yy in range(11):
+                put(x, yy, 0x24 if yy == 0 else 0x61 if yy == 10 else 0x25)
+        elif y == 13 and b == 0x42:
+            goal = x
+            put(x, 6, 0xC5)
+        elif y == 13 and b == 0x44:
+            for j in range(13):
+                put(x + j, 8, 0x89)
+        elif y == 15 and op == 4:
+            for j in range(4):
+                yy = (b & 15) - 1
+                put(x + j, yy, [0x1C, 0x1D, 0x1E, 0x15][j])
+                put(x + j, yy + 1, [0x1F, 0x20, 0x21, 0x15][j])
+                if j >= 2:
+                    for k in range(yy):
+                        put(x + j, k, 0x14 + j - 2)
+            if kind in (0, 2) and goal is None:
+                goal = x
+    if goal is None:
+        goal = width - 18
+        put(goal, 8, 0xC5)
+    spawns = []
+    for x, y, b in objs:
+        if y == 13 and b in (0x48, 0x49):
+            end = next(
+                (
+                    xx
+                    for xx, yy, bb in objs
+                    if xx > x and yy == 13 and bb in (0x48, 0x49, 0x4A)
+                ),
+                goal,
+            )
+            for xx in range(x + 4, end, 9):
+                spawns.append((xx, 10, 7 if b == 0x48 else 9))
+        elif y < 12 and b >> 4 == 1 and data[1] >> 6 == 2:
+            spawns.append((x, y, 9))  # cannon mouth
+
+    for x, y, b in objects(enemies, True):
+        b &= 63
+        if 0x24 <= b <= 0x2C:  # stationary substitutes for lifts
+            for j in range(3):
+                put(x + j, max(2, min(10, y - 1)), 0x63)
+        elif 0x1B <= b <= 0x20:
+            spawns.append((x, max(0, min(y - 2, 10)), 6))  # firebar anchor
+        elif b == 0x11:
+            spawns.append((x, 2, 11))  # Lakitu drops Spinies from his cloud
+        elif b in (0, 1, 2, 3, 5, 6, 7, 10, 11, 0x0E, 0x0F) or 0x37 <= b <= 0x3E:
+            group = b >= 0x37
+            for j in range(2 + (b % 2 == 0) if group else 1):
+                style = (
+                    4 if kind == 0 else int(b in (0, 1, 2, 3, 0x0E, 0x0F) or b >= 0x3B)
+                )
+                if b == 5:
+                    style = 10
+                spawns.append(
+                    (
+                        x + j * 2,
+                        (6 if (b - 0x37) & 2 else 10)
+                        if group
+                        else max(0, min(y - 1, 10)),
+                        style,
+                    )
+                )
+    if kind == 3:
+        spawns = [e for e in spawns if e[0] < goal - 12]
+        spawns.append((goal - 6, 6, 5))
+    return (
+        (cols if name == "UndergroundArea3" else cols[: goal + 17]),
+        goal,
+        sorted(spawns),
+    )
+
+
+def pixels(chrdata, tile):
+    a = chrdata[tile * 16 : tile * 16 + 16]
+    return [
+        [(a[y] >> i & 1) + 2 * (a[y + 8] >> i & 1) for i in range(7, -1, -1)]
+        for y in range(8)
+    ]
+
+
+def graphics():
+    src = (ROOT / "src/screen_render.s").read_text()
+    raw = (ROOT / "chr/mmc3/bg_ground.chr").read_bytes()
+    patterns, colors = bytearray(), bytearray()
+    cache = {}
+
+    def convert(n, palette):
+        key = n, palette
+        if key in cache:
+            return cache[key]
+        idx = cache[key] = len(cache)
+        for row in pixels(raw, n):
+            s = [palette[v] for v in row]
+            ranked = sorted(set(s), key=lambda v: (-s.count(v), v))
+            # Preserve backdrop/outline even on a busy scanline.
+            bg = 0 if 0 in s else ranked[0]
+            fg = next((v for v in ranked if v != bg), bg)
+            patterns.append(
+                sum(
+                    (v == fg or (v != bg and v != 1)) << (7 - i)
+                    for i, v in enumerate(s)
+                )
+            )
+            colors.append(fg * 16 + bg)
+        return idx
+
+    for i in range(37):
+        convert(i, (0, 15, 15, 15))
+    meta = bytearray(256 * 4)
+    flags = bytearray(256)
+    palettes = [(0, 3, 12, 1), (0, 11, 6, 1), (0, 15, 14, 4), (0, 11, 6, 1)]
+    for line in src.splitlines():
+        m = re.match(r"MTILE_CURRENT_INDEX .set \$(\w+)", line)
+        if m:
+            idx = int(m[1], 16)
+        m = re.match(r"\s*MTileDefine (.*)", line)
+        if not m:
+            continue
+        tiles = [int(v, 16) for v in re.findall(r"\$(\w\w)", m[1])[:4]]
+        palette = palettes[idx >> 6]
+        if idx == 0x52:
+            palette = (0, 7, 4, 1)
+        if idx in (0x62, 0x89):
+            palette = (0, 15, 14, 1)
+        for i, j in enumerate([0, 2, 1, 3]):
+            meta[i * 256 + idx] = convert(tiles[j], palette)
+        flags[idx] = int("MTILE_SOLID" in line and idx not in (0xC2, 0xC3, 0x24, 0x25))
+        idx += 1
+    # Decode only the title sign from the NES PPU update stream, not its
+    # attribute table, player selector or copyright line.
+    data = (ROOT / "chr/raw/titlescreen.bin").read_bytes()
+    i = 0
+    logo = bytearray([36]) * (22 * 11)
+    while data[i]:
+        address, cmd = data[i] * 256 + data[i + 1], data[i + 2]
+        i += 3
+        count = cmd & 63
+        for j in range(count):
+            tile = data[i if cmd & 64 else i + j]
+            row, col = divmod(address - 0x2000, 32)
+            if 4 <= row <= 14 and 5 <= col <= 26:
+                logo[(row - 4) * 22 + col - 5] = convert(tile, (0, 11, 6, 1))
+            address += 32 if cmd & 128 else 1
+        i += 1 if cmd & 64 else count
+    assert len(patterns) <= 2048
+    (OUT / "title.bin").write_bytes(logo)
+    for name, buf in [
+        ("patterns", patterns),
+        ("colors", colors),
+        ("meta", meta),
+        ("solid", flags),
+    ]:
+        (OUT / (name + ".bin")).write_bytes(buf)
+    mario = (ROOT / "chr/mmc3/sprites_mario.chr").read_bytes()[2048:]
+    enemy = (ROOT / "chr/mmc3/sprites_overworld.chr").read_bytes()
+    sprites = bytearray()
+    big = (ROOT / "chr/mmc3/sprites_mario.chr").read_bytes()
+    for bank, offset in [(mario, 0), (big, 0), (big, 0x20)]:
+        for flip in [False, True]:
+            for pose in [0, 4, 20]:
+                for mask in [(1,), (2,), (3,)]:
+                    sprite(sprites, bank, offset + pose, flip, mask)
+    # The first 144 sprite patterns belong to the current Mario size. Swap
+    # only those on growth/shrink; the remaining patterns stay resident.
+    (OUT / "super.bin").write_bytes(sprites[576:])
+    sprites[576:] = bytes(576)
+
+    def pair(raw, tiles, masks=((1, 3), (2,))):
+        packed = b"".join(raw[i * 16 : i * 16 + 16] for i in tiles)
+        for mask in masks:
+            sprite(sprites, packed, 0, False, mask)
+
+    for pose in (0x30, 0x34):
+        pair(enemy, range(pose, pose + 4))
+    # The original shell uses the same half, mirrored on the right.
+    shell = enemy[0x1A * 16 : 0x1C * 16]
+    pair(shell + bytes(int(f"{b:08b}"[::-1], 2) for b in shell), range(4))
+    water = (ROOT / "chr/mmc3/sprites_water.chr").read_bytes()
+    pair(water, [0x2C, 0x2D, 0x2E, 0x2F])
+    misc = (ROOT / "chr/mmc3/sprites_misc.chr").read_bytes()
+    flower = misc[0x38 * 16 : 0x3A * 16]
+    pair(flower + bytes(int(f"{b:08b}"[::-1], 2) for b in flower), range(4))
+    boss = (ROOT / "chr/mmc5/sprites_enemies.chr").read_bytes()[2048:]
+    # Face left: reflect each 16px half, then place head before shell.
+    for pose in (8, 4, 0x28, 0x20):
+        for mask in [(1,), (2, 3)]:
+            sprite(sprites, boss, pose, True, mask)
+    for flip in [False, True]:
+        for mask in [(1, 3), (2,)]:
+            sprite(sprites, enemy, 0x22, flip, mask)
+    misc = (ROOT / "chr/mmc3/sprites_misc.chr").read_bytes()
+    for mask in [(1, 3), (2,)]:
+        sprite(sprites, misc, 0x3C, False, mask)
+    # Each half of a 16x16 sprite occupies sixteen consecutive bytes.
+    sprites.extend(bytes(6) + bytes([3, 7, 7, 3]) + bytes(6))
+    sprites.extend(bytes(6) + bytes([192, 224, 224, 192]) + bytes(6))
+    # Triangular pennant, pointing left toward the player.
+    rows = [(1 << min(15, 2 * i + 1)) - 1 for i in range(8)] + [0] * 8
+    sprites.extend(v >> 8 for v in rows)
+    sprites.extend(v & 255 for v in rows)
+    assert len(sprites) == 248 * 8
+    (OUT / "sprites.bin").write_bytes(sprites)
+    # Swap the castle boss out of VRAM for the outdoor enemy bank.
+    sprites = bytearray()
+    for raw, pose in (
+        (enemy[1024:], 0x0C),
+        (enemy, 0x1C),
+        (enemy, 8),
+        (enemy[1024:], 0x20),
+    ):
+        for mask in [(1, 3), (2,)]:
+            sprite(sprites, raw, pose, False, mask)
+    (OUT / "outdoor.bin").write_bytes(sprites)
+
+
+def sprite(out, raw, pose, flip, mask):
+    for quadrant in range(4):
+        rows = pixels(raw, pose + (quadrant ^ (2 if flip else 0)))
+        for row in rows:
+            if flip:
+                row = row[::-1]
+            out.append(sum((v in mask) << (7 - i) for i, v in enumerate(row)))
+
+
+def bonus_routes(name, ident, world):
+    # A row-E enemy command sets the destination for subsequent enterable
+    # pipes. Its third byte selects the world and entrance page.
+    links = []
+    returns = []
+    list(objects(table("E_" + name) + [255], True, links))
+    list(objects(table("E_UndergroundArea3"), True, returns))
+    objs = list(objects(table("L_" + name)[2:]))
+    for x, y, b in objs:
+        if y >= 12 or b >> 3 != 15:
+            continue
+        targets = [e for e in links if e[0] <= x and e[2] >> 5 == world]
+        if not targets or targets[-1][1] != 0x42:
+            continue
+        page = targets[-1][2] & 31
+        matches = [
+            v & 31
+            for loc, dest, v in returns
+            if loc // 16 in (page, page + 1) and dest == ident & 127 and v >> 5 == world
+        ]
+        if not matches:
+            continue
+        exit_page = matches[0]
+        pipes = [
+            (xx, yy)
+            for xx, yy, bb in objs
+            if xx // 16 == exit_page and yy < 12 and bb >> 4 == 7
+        ]
+        if pipes:
+            xx, yy = pipes[0]
+            yield (x, page // 2, xx, yy)
+
+
+def compile_game():
+    from music import compile_music
+
+    OUT.mkdir(exist_ok=True, parents=True)
+    graphics()
+    compile_music(ROOT, OUT)
+    common = (ROOT / "src/common.s").read_text()
+    stages = []
+    areas = {}
+    pool = {}
+    asm = []
+    for w in range(1, 9):
+        for ident in table(f"World{w}Areas", common):
+            if ident == 0x29:
+                continue  # pipe entrance cutscene, not a stage
+            kind = ident >> 5 & 3
+            name = (
+                ["Water", "Ground", "Underground", "Castle"][kind]
+                + "Area"
+                + str((ident & 31) + 1)
+            )
+            routes = list(bonus_routes(name, ident, w - 1))
+            asm += [f"pipes_stage{len(stages)}:"]
+            for x, room, xx, yy in routes:
+                # Return with the pipe in the middle of the visible screen.
+                asm += [
+                    f" dw {16 * x}, bonus_room{room}, {16 * (xx - 7)}",
+                    f" db {(yy - 1) * 16}",
+                ]
+            asm += [" dw 65535"]
+            stages.append(name)
+            if name in areas:
+                continue
+            cols, goal, spawns = area(name, kind)
+            areas[name] = cols
+            asm += [
+                f"{name}: dw columns_{name}, enemies_{name}, {goal * 16}",
+                f" db {kind}",
+                f"columns_{name}:",
+            ]
+            ids = [pool.setdefault(tuple(c), len(pool)) for c in cols]
+            asm += [
+                " dw " + ",".join(f"column{i}" for i in ids[j : j + 12])
+                for j in range(0, len(ids), 12)
+            ]
+            asm += [f"enemies_{name}:"]
+            for x, y, style in spawns:
+                asm += [f" dw {x * 16}", f" db {y * 16 + style}"]
+            asm += [" dw 65535", " db 0"]
+    assert len(stages) == 32
+    pages = table("HalfwayPageNybbles", (ROOT / "src/player.s").read_text())
+    solid = (OUT / "solid.bin").read_bytes()
+    asm += ["checkpoints:"]
+    for i, name in enumerate(stages):
+        page = (pages[i // 2] >> (0 if i & 1 else 4)) & 15
+        cols = areas[name]
+        # Pick a safe tile at the original halfway page, not inside a pipe
+        # or in midair. Mario starts small after losing a life.
+        choices = [
+            (x, y)
+            for x in range(1, 14)
+            for y in range(11, 1, -1)
+            if solid[cols[page * 16 + x][y]] and not solid[cols[page * 16 + x][y - 1]]
+        ]
+        x, y = choices[0] if choices else (1, 10)
+        timer = [4, 4, 3, 2][table("L_" + name)[0] >> 6]
+        asm += [f" db {page},{16 * x},{16 * (y - 1)},{timer}"]
+    asm += ["stage_list: dw " + ",".join(stages)]
+    asm += ["pipe_list: dw " + ",".join(f"pipes_stage{i}" for i in range(32))]
+    bonus, _, _ = area("UndergroundArea3", 2)
+    for room in range(5):
+        ids = [
+            pool.setdefault(tuple(c), len(pool))
+            for c in bonus[32 * room : 32 * room + 16]
+        ]
+        asm += [
+            f"bonus_room{room}: dw bonus_cols{room}, empty_enemies,208",
+            " db 2",
+            f"bonus_cols{room}: dw " + ",".join(f"column{i}" for i in ids),
+        ]
+    asm += ["empty_enemies: dw 65535"]
+    for col, i in pool.items():
+        asm += [f"column{i}: db " + ",".join(map(str, col))]
+    (OUT / "areas.inc").write_text("\n".join(asm) + "\n")
+    print(len(areas), "distinct main areas;", len(pool), "unique columns")
+
+
+if __name__ == "__main__":
+    compile_game()
