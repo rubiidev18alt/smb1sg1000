@@ -67,6 +67,8 @@ yview   byte
 tall    byte
 morph   byte
 theme   byte                    ; last uploaded theme + 1
+scene   byte                    ; 0 gameplay, 1 lives card, 2 pipe entrance
+pipeclip byte                   ; pixels hidden by the pipe mouth
 duck    byte
 spring_y byte                   ; 0 if no spring is visible
 spring_x byte
@@ -184,6 +186,7 @@ input:  in a,(PAD)
 title:  call silence
         xor a
         ld (s+State.stage),a
+        ld (s+State.scene),a
         ld (s+State.retry),a
         ld (s+State.scorelo),a
         ld (s+State.scorehi),a
@@ -239,7 +242,13 @@ title:  call silence
         and 31
         ld (s+State.stage),a
         jr .select
-restart:call load_stage
+restart:call lives_card
+        call pipe_intro
+.resume:xor a
+        ld (s+State.scene),a
+        ld (s+State.pipeclip),a
+        call input              ; consume edges during the intermission
+        call load_stage
 play:   call prepare_sprites
         call vblank
         call reveal_sprites
@@ -610,7 +619,8 @@ try_pipe:
 .warp:  ld (s+State.stage),a
         xor a
         ld (s+State.retry),a
-        jp load_stage
+        ld sp,$c400             ; abandon try_pipe and start the warp destination
+        jp restart
 .lookup:push hl
         ld a,(s+State.stage)
         add a,a
@@ -762,6 +772,7 @@ died:   ld sp,$c400             ; also reachable from nested actor collision
 .sprite:call draw_sprites
         pop bc
         djnz .death
+        call time_up_card
         call checkpoint
         ld a,(s+State.scroll+1)
         cp (hl)
@@ -770,15 +781,15 @@ died:   ld sp,$c400             ; also reachable from nested actor collision
         ld (s+State.retry),a
 .life:  ld hl,s+State.lives
         dec (hl)
-        ld de,lost_text
         jr nz,.retry
         ld a,6
         call start_music
         ld de,over_text
         call banner
         jp title
-.retry: call banner
-        jp restart
+.retry: call finish_song
+        call lives_card
+        jp restart.resume
 finish_area:
         ld a,(s+State.bonus)
         or a
@@ -811,41 +822,31 @@ clear_stage:
         inc (hl)
         ld a,(hl)
         cp 32
-        ld de,clear_text
         jr c,.next
+        dec (hl)                ; final HUD still reads 8-4
         ld a,9
         call start_music
         ld de,win_text
         call banner
         jp title
-.next:  call banner
+.next:  call finish_song
         jp restart
-banner: push de
-        call redraw
-        pop de
-        ld hl,$1926
-        call text
-        ld hl,$1988
-        ld de,start_text
-        call text
+banner: call message_card
+        ld b,240
+.wait:  push bc
         call vblank
-        call flip
-.release:call vblank
         call music_tick
         call input
+        ld a,(s+State.edge)
         and $30
-        jr nz,.release
-.press: call vblank
-        call music_tick
-        call input
-        and $30
-        jr z,.press
+        pop bc
+        ret nz
+        djnz .wait
         ret
-lost_text: db '     TRY AGAIN     ',0
 over_text: db '     GAME OVER     ',0
-clear_text: db '   COURSE CLEAR    ',0
 win_text: db ' PEACH IS RESCUED  ',0
 
+        include "intermission.asm"
         include "music.asm"
         include "themes.asm"
         align 16

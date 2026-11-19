@@ -192,6 +192,15 @@ def area(name, kind):
                     yy,
                     0 if yy == 0 else 0x24 if yy == 1 else 0x61 if yy == 10 else 0x25,
                 )
+        elif (
+            y == 13 and b == 0x40
+        ):  # IntroPipe: short horizontal mouth and capped riser
+            for j in range(4):
+                put(x + j, 9, (0x1C, 0x1D, 0x1E, 0x15)[j])
+                put(x + j, 10, (0x1F, 0x20, 0x21, 0x15)[j])
+                if j >= 2:
+                    put(x + j, 7, 0x10 + j - 2)
+                    put(x + j, 8, 0x14 + j - 2)
         elif y == 13 and b == 0x42:
             goal = x
             put(x, 6, 0xC5)
@@ -680,13 +689,15 @@ def compile_game():
 
     common = (ROOT / "src/common.s").read_text()
     stages = []
+    entrances = []
     areas = {}
     pool = {}
     asm = []
     for w in range(1, 9):
         for ident in table(f"World{w}Areas", common):
             if ident == 0x29:
-                continue  # pipe entrance cutscene, not a stage
+                entrances.append(len(stages))
+                continue  # shared entrance scene precedes the next playable stage
             kind = ident >> 5 & 3
             name = (
                 ["Water", "Ground", "Underground", "Castle"][kind]
@@ -784,6 +795,14 @@ def compile_game():
     asm += ["stage_sky: db " + ",".join(map(str, skies))]
     asm += ["stage_list: dw " + ",".join(stages)]
     asm += ["pipe_list: dw " + ",".join(f"pipes_stage{i}" for i in range(32))]
+    intro, _, _ = area("GroundArea10", 1)
+    mouth = next(x for x, col in enumerate(intro) if col[9] == 0x1C)
+    asm += [
+        "intro_stages: db " + ",".join(map(str, [*entrances, 255])),
+        f"INTRO_MOUTH equ {mouth * 16}",
+        "intro_columns: dw "
+        + ",".join(f"column{pool.setdefault(tuple(c), len(pool))}" for c in intro[:16]),
+    ]
     bonus, _, _ = area("UndergroundArea3", 2)
     for room in range(5):
         ids = [
@@ -798,21 +817,25 @@ def compile_game():
         ]
     asm += ["empty_enemies: dw 65535"]
     # Overlap equal suffixes/prefixes; unpack still copies 12 raw bytes.
-    pending = set(map(bytes, pool))
-    packed = bytearray()
-    while pending:
-        prefix = bytes(packed[-11:])
-        col = None
-        for size in range(len(prefix), 0, -1):
-            candidates = [c for c in pending if c.startswith(prefix[-size:])]
-            if candidates:
-                col = min(candidates)
-                break
-        if col is None:
-            col = min(pending)
-            size = 0
-        pending.remove(col)
-        packed.extend(col[size:])
+    # Join the longest available overlaps first, rather than committing to
+    # one chain. The cartridge still needs only a pointer and a 12-byte copy.
+    chunks = sorted(map(bytes, pool))
+    for size in range(11, 0, -1):
+        prefixes = {}
+        for i, c in enumerate(chunks):
+            prefixes.setdefault(c[:size], set()).add(i)
+        for i, c in enumerate(chunks):
+            if not c:
+                continue
+            while choices := prefixes.get(c[-size:], set()) - {i}:
+                j = min(choices)
+                other = chunks[j]
+                prefixes[other[:size]].remove(j)
+                c += other[size:]
+                chunks[j] = b""
+            chunks[i] = c
+        chunks = [c for c in chunks if c]
+    packed = b"".join(chunks)
     for col, i in pool.items():
         asm.append(f"column{i} equ column_pool+{packed.index(bytes(col))}")
     (OUT / "columns.bin").write_bytes(packed)

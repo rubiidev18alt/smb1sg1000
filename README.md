@@ -12,9 +12,11 @@
 | Down | Enter a connected pipe while standing on its mouth. |
 | Button 1 on the title | Start the selected course. |
 | Button 2 on the title | Advance one level: 1–4, then the next world. After 8-4 it wraps to 1-1. |
-| Either button after a life loss or clear | Continue. |
+| Either button on Game Over or the final victory screen | Return to title early. |
 
 The cartridge follows the **32-stage, eight-world main route** using SMB1Base’s area streams, halfway points and CHR art. Mario accelerates and brakes with fractional velocity; speed and button hold affect the jump arc. In 1-3 the girders move and carry Mario. In 1-2 you can ride an elevator above the ceiling, run over the exit and drop down to the warp pipes. The Starman bounces out of its brick and grants temporary contact invincibility.
+
+Course starts, retries, and warp-zone arrivals show a timed black **WORLD / Mario × lives** card. No button press is needed. On first entry to 1-2, 2-2, 4-2 and 7-2, Mario walks out of the castle and into the sideways pipe while only the overworld lead-in plays. Underground and underwater music start on arrival. A retry resumes the course without repeating the walk, and ordinary bonus-pipe trips stay within the current course. [Preview the 1-2 entrance in Gearsystem.](sg1000/pipe-intro.gif)
 
 In **2-2 and 7-2**, the waterline is visible just below the HUD. Tap Button 1 to swim through the coral, collect submerged coins and dodge Bloopers and Cheep Cheeps. The shared enemy command launches fish here and Bullet Bills on land. The title waits in silence; starting an overworld course plays the opening phrase before the main loop.
 

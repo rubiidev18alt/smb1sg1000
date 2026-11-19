@@ -300,7 +300,10 @@ prepare_sprites:
         add a,12
         ld c,a
         call player_half
-.others:call spring_sprite
+.others:ld a,(s+State.scene)
+        or a
+        jp nz,.submit
+        call spring_sprite
         call lift_sprites
         ld ix,actors
         call enemy_sprite

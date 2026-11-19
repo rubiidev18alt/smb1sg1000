@@ -77,6 +77,13 @@ class CartridgeTest(unittest.TestCase):
         self.assertEqual(
             [rom[themes + i] for i in (0, 1, 3, 5, 8, 14, 22)], [1, 2, 3, 0, 4, 5, 3]
         )
+        addr = symbols["intro_stages"]
+        self.assertEqual(rom[addr : addr + 5], bytes([1, 5, 13, 25, 255]))
+        music = word(symbols["song_list"] + 2 * 10)
+        self.assertEqual(
+            [word(music + i) for i in (0, 2, 4)],
+            [symbols["GroundLevelLeadInHdr"], 0, 0],
+        )
         skies = symbols["stage_sky"]
         self.assertEqual((rom[skies + 4], rom[skies + 8]), (5, 1))  # 2-1 day, 3-1 night
         for i, v in enumerate(stages):

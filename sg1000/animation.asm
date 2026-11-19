@@ -102,8 +102,32 @@ animate_mario:
         add hl,bc
 .addr:  call address
         ex de,hl
+        ld a,(s+State.pipeclip)
+        or a
         ld b,96
-        jp short_upload
+        jp z,short_upload
+        ; Mask the rightmost columns in each color layer as Mario enters.
+        ld b,a
+        ld de,$ffff
+.mask:  sla e
+        rl d
+        djnz .mask
+        ld c,3
+.color: ld b,16
+.left:  ld a,(hl)
+        and d
+        out (VDP),a
+        inc hl
+        djnz .left
+        ld b,16
+.right: ld a,(hl)
+        and e
+        out (VDP),a
+        inc hl
+        djnz .right
+        dec c
+        jr nz,.color
+        ret
 
 anim_tick:
         ld hl,s+State.morph

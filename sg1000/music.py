@@ -46,6 +46,7 @@ def compile_music(root, out):
         ["EndOfLevelMusHdr"],
         ["WinCastleMusHdr"],
         ["VictoryMusHdr"],
+        ["GroundLevelLeadInHdr"],  # non-looping pipe entrance
     ]
     parts = {}
     asm = ["song_list: dw " + ",".join(f"song{i}" for i in range(len(songs)))]

@@ -105,16 +105,40 @@ def select(slot=0):
         frame(2, 8)
         frame(2)
     frame(3, 0)
-    # Changing all three color banks takes a few video frames; begin the
-    # tape at a specific simulation tick, not during the palette upload.
-    for _ in range(80):
-        if slot == 0 and 2 <= st("tick") <= 6:
+    wait_entry(slot)
+
+
+def wait_entry(slot, *, retry=False):
+    scenes = set()
+    walk = []
+    clipped = False
+    lead = False
+    for _ in range(800):
+        sc = st("scene")
+        if sc:
+            scenes.add(sc)
+        if sc == 2 and st("px") >= 32:
+            walk.append(st("px"))
+            clipped |= 0 < st("pipeclip") < 16
             p = symbols["playlist"] - 0xC000
-            assert ram[p] + 256 * ram[p + 1] == symbols["song1"] + 2  # lead-in playing
-        if st("tick") == 47:
+            lead |= ram[p] + 256 * ram[p + 1] == symbols["song10"] + 2
+        if not sc and 1 in scenes and st("tick") == 47:
             break
         frame(1)
-    assert st("tick") == 47
+    assert st("scene") == 0 and st("tick") == 47 and st("stage") == slot
+    if slot in (1, 5, 13, 25) and not retry:
+        assert (
+            scenes == {1, 2}
+            and min(walk) <= 33
+            and max(walk) == 160
+            and clipped
+            and lead
+        )
+    else:
+        assert scenes == {1}
+    if slot == 0:
+        p = symbols["playlist"] - 0xC000
+        assert ram[p] + 256 * ram[p + 1] == symbols["song1"] + 2
 
 
 def run_tape(name):
@@ -127,6 +151,8 @@ def run_tape(name):
             assert st("lives") == 3
             if st("star") or ram[base + symbols["State.star"] + 1]:
                 flags.add("star")
+            if st("scene") == 1:
+                flags.add("card")
             if st("bonus"):
                 flags.add("bonus")
             if (
@@ -177,9 +203,7 @@ def run_tape(name):
 select()
 flags, _ = run_tape("star-and-flag")
 assert "star" in flags and st("stage") == 1
-frame(5)
-frame(3, 0)
-frame(45)
+wait_entry(1)
 assert st("kind") == 2 and st("py") == 160
 core.retro_reset()
 select()
@@ -187,8 +211,16 @@ flags, _ = run_tape("bonus-pipe")
 assert "bonus" in flags and st("stage") == 1
 core.retro_reset()
 select(1)
+for _ in range(350):
+    frame(1, 7, 8)
+    if st("lives") == 2:
+        break
+assert st("lives") == 2
+wait_entry(1, retry=True)  # lives card, no castle walk on an underground retry
+core.retro_reset()
+select(1)
 flags, _ = run_tape("roof-warp")
-assert "roof" in flags and st("stage") == 4
+assert {"roof", "card"} <= flags and st("stage") == 4
 core.retro_reset()
 select(2)
 _, riding = run_tape("lifts-1-3")
@@ -207,6 +239,8 @@ select(25)
 flags, _ = run_tape("swim-7-2")
 assert {4, 14} <= flags and 9 not in flags and st("stage") == 26
 core.retro_reset()
+select(13)  # fourth shared pipe entrance: 4-2
+core.retro_reset()
 select(17)
 flags, _ = run_tape("spring-5-2")
 assert {144, 152, 156, "offscreen", "returned"} <= flags
@@ -224,7 +258,7 @@ for _ in range(4):
     frame(3, 8)
     frame(2)
 frame(3, 0)
-frame(25)
+wait_entry(4)
 assert st("stage") == 4 and not st("bonus") and st("kind") == 1
 # The first source enemy of 2-1 is at column $18, row 5. Observe it
 # on its allocation tick, before walking/gravity have carried it far.
@@ -248,12 +282,15 @@ for lives in (2, 1, 0):
         if st("lives") == lives:
             break
     assert st("lives") == lives
-    frame(20)
-    frame(3, 0)
-    frame(45)
+    if lives:
+        wait_entry(0, retry=True)
+    else:
+        frame(20)
+        frame(3, 0)
+        frame(45)
 assert st("lives") == 3 and st("stage") == 0
 assert video_sizes == {(256, 192)}
 core.retro_deinit()
 print(
-    f"PASS: {video_frames} frames; 1-1 Starman and bonus routes, 1-2 roof to world 2, 1-3 moving lifts, 2-1 spawn, 2-2 and 7-2 swims, 2-4 castle clear, 5-2 spring and offscreen return, music, selector wrap and restart"
+    f"PASS: {video_frames} frames; 1-1 Starman and bonus routes, 1-2 roof to world 2, 1-3 moving lifts, 2-1 spawn, 2-2 and 7-2 swims, 2-4 castle clear, 5-2 spring and offscreen return, lives cards and pipe intros, music, selector wrap and restart"
 )
