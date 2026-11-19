@@ -217,7 +217,13 @@ title:  call silence
         call load_stage
         xor a
         ld (playing),a          ; start the lead-in on Start, not on the title
-        call redraw
+        ; Shift only the title scenery up one tile. Both rows of the brick
+        ; floor remain visible, and row 23 is free for the credit.
+        ld hl,$1860
+        call back_address
+        ld ixl,4                ; source tile rows 4..23 -> screen rows 3..22
+        ld ixh,20
+        call redraw.row
         call hud
         ld hl,$1865
         ld de,logo
@@ -237,34 +243,15 @@ title:  call silence
         ld hl,$1a08
         ld de,start_text
         call text
-        ; Center the credit just above the ground, below the selectors.
-        ld hl,$1000+8*CREDIT_FIRST
-        call address
-        ld hl,credit_art
-        ld de,8*CREDIT_WIDTH
-        call transfer
-        ld hl,$3000+8*CREDIT_FIRST
-        call address
-        ld a,$f0                ; white on the sky backdrop
-        ld b,8*CREDIT_WIDTH
-.ink:   out (VDP),a
-        nop
-        nop
-        djnz .ink
-        ld hl,$1800+21*32+(32-CREDIT_WIDTH)/2
-        call back_address
-        ld a,CREDIT_FIRST
-        ld b,CREDIT_WIDTH
-.credit:out (VDP),a
-        inc a
-        nop
-        djnz .credit
+        ld hl,$1800+23*32
+        ld de,port_credit
+        call text
         ld a,$c2
         out (CTRL),a
         ld a,$81
         out (CTRL),a
         call flip
-        ld a,160
+        ld a,152                 ; stand on the raised title floor
         ld (s+State.py),a
         call draw_sprites
         call input
@@ -727,6 +714,7 @@ hud_score: db 'MARIO ',0
 hud_time: db 'TIME ',0
 hud_world: db 'WORLD ',0
 start_text: db ' PRESS BUTTON 1 ',0
+port_credit: db '      PORT BY ARENA AGENT       ',0
 
 ; Match the pipe under Mario against the original area's warp links.
 try_pipe:
@@ -977,7 +965,6 @@ color_rows: incbin "../build/sg1000/color_rows.bin"
 color_ids: incbin "../build/sg1000/color_ids.bin"
 color_ids_end:
 pulse_colors: incbin "../build/sg1000/pulse.bin"
-credit_art: incbin "../build/sg1000/credit.bin"
 logo:   incbin "../build/sg1000/title.bin"
 patterns: incbin "../build/sg1000/patterns.bin"
 patterns_end:

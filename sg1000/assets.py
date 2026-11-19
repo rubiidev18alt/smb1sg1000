@@ -356,36 +356,6 @@ def compile_palettes(colors):
     (OUT / "color_ids.bin").write_bytes(bytes(ids))
 
 
-def title_credit(logo, meta):
-    # The sign ends above the bottom Graphics II bank. Its otherwise unused
-    # tile slots there can hold lowercase lettering without changing the HUD.
-    caption = "port by arena agent"
-    font = {
-        " ": (0, 0, 0, 0, 0, 0, 0, 0),
-        "a": (0, 0, 14, 1, 15, 17, 15, 0),
-        "b": (16, 16, 30, 17, 17, 17, 30, 0),
-        "e": (0, 0, 14, 17, 31, 16, 14, 0),
-        "g": (0, 0, 15, 17, 17, 15, 1, 14),
-        "n": (0, 0, 30, 17, 17, 17, 17, 0),
-        "o": (0, 0, 14, 17, 17, 17, 14, 0),
-        "p": (0, 0, 30, 17, 17, 30, 16, 16),
-        "r": (0, 0, 22, 25, 16, 16, 16, 0),
-        "t": (4, 4, 31, 4, 4, 4, 3, 0),
-        "y": (0, 0, 17, 17, 17, 15, 1, 14),
-    }
-    width = 2 * ((6 * len(caption) + 15) // 16)  # center on a 32-tile row
-    private = set(logo) - set(meta) - set(range(37))
-    first = next(i for i in sorted(private) if set(range(i, i + width)) <= private)
-    rows = [
-        "".join(f"{font[c][y]:05b}0" for c in caption).center(8 * width, "0")
-        for y in range(8)
-    ]
-    (OUT / "credit.bin").write_bytes(
-        bytes(int(row[x : x + 8], 2) for x in range(0, 8 * width, 8) for row in rows)
-    )
-    return first, width
-
-
 def graphics():
     src = (ROOT / "src/screen_render.s").read_text()
     raw = (ROOT / "chr/mmc3/bg_ground.chr").read_bytes()
@@ -484,9 +454,7 @@ def graphics():
     ]:
         patterns.extend(rows)
         colors.extend([col] * 8)
-    credit_first, credit_width = title_credit(logo, meta)
     (OUT / "glyphs.inc").write_text(
-        f"CREDIT_FIRST equ {credit_first}\nCREDIT_WIDTH equ {credit_width}\n"
         f"DASH equ {len(patterns) // 8 - 2}\nHUD_COIN equ DASH+1\n"
     )
     for rows in ([24, 24, 24, 24, 24, 0, 24, 0], [0, 0, 0, 0, 0, 0, 24, 0]):
