@@ -237,6 +237,28 @@ title:  call silence
         ld hl,$1a08
         ld de,start_text
         call text
+        ; Center the credit just above the ground, below the selectors.
+        ld hl,$1000+8*CREDIT_FIRST
+        call address
+        ld hl,credit_art
+        ld de,8*CREDIT_WIDTH
+        call transfer
+        ld hl,$3000+8*CREDIT_FIRST
+        call address
+        ld a,$f0                ; white on the sky backdrop
+        ld b,8*CREDIT_WIDTH
+.ink:   out (VDP),a
+        nop
+        nop
+        djnz .ink
+        ld hl,$1800+21*32+(32-CREDIT_WIDTH)/2
+        call back_address
+        ld a,CREDIT_FIRST
+        ld b,CREDIT_WIDTH
+.credit:out (VDP),a
+        inc a
+        nop
+        djnz .credit
         ld a,$c2
         out (CTRL),a
         ld a,$81
@@ -955,6 +977,7 @@ color_rows: incbin "../build/sg1000/color_rows.bin"
 color_ids: incbin "../build/sg1000/color_ids.bin"
 color_ids_end:
 pulse_colors: incbin "../build/sg1000/pulse.bin"
+credit_art: incbin "../build/sg1000/credit.bin"
 logo:   incbin "../build/sg1000/title.bin"
 patterns: incbin "../build/sg1000/patterns.bin"
 patterns_end:
