@@ -32,7 +32,7 @@ make sg1000         # writes build/smb1.sg
 make sg1000-test    # verify the assembled ROM against the source area tables
 ```
 
-For a controller-driven emulator test, run `make sg1000-test GEARSYSTEM_CORE=/path/to/gearsystem_libretro.so`. The recorded pad inputs clear 1-1 both overland (collecting Starman) and through the bonus pipe, take the 1-2 roof to world 2, and clear 1-3 using moving lifts. It also checks an enemy spawn in 2-1, swims through both 2-2 and 7-2, clears the lava pits and Bowser bridge in 2-4, and checks audio output, title wraparound, life loss and restart. Tested in Gearsystem; not verified on a physical console.
+For a controller-driven emulator test, run `make sg1000-test GEARSYSTEM_CORE=/path/to/gearsystem_libretro.so`. The recorded pad inputs clear 1-1 both overland (collecting Starman) and through the bonus pipe, take the 1-2 roof to world 2, and clear 1-3 using moving lifts. It also checks an enemy spawn in 2-1, swims through both 2-2 and 7-2, clears the lava pits and Bowser bridge in 2-4, bounces Mario off the 5-2 spring and checks that he disappears above the screen and returns on descent. It also checks audio output, title wraparound, life loss and restart. Tested in Gearsystem; not verified on a physical console.
 
 The native code is in [`sg1000/`](sg1000/). It uses 1 KiB of work RAM and 16 KiB of VRAM. Sixteen mutable columns stream from cartridge ROM. Overlapping column data share cartridge storage without runtime decompression. The renderer prepares the next name table, sprite attribute table and changed Mario pose offscreen. It switches the tables together at vertical blank during play, so a scrolling background doesn’t get a frame ahead of its sprites.
 

@@ -322,11 +322,14 @@ move_y: ld a,(s+State.edge)
         ld a,1
         ld (s+State.floor),a
         call tile_at
-        cp $68
+        cp $67
         jr nz,.stop
-        ld a,-9                ; 2-1 spring clears the high wall
-        ld (s+State.vy),a
-        ret
+        ld a,12
+        ld (s+State.spring_t),a
+        ld a,(s+State.py)
+        add a,8
+        ld (s+State.py),a
+        jr .stop
 .head:  call tile_at
         cp $57
         jr z,.power
@@ -422,3 +425,26 @@ earn_coin:
         ld (s+State.lives),a
 .sound: ret
 
+
+; Keep Mario on the moving cap until the original high bounce releases.
+spring_recoil:
+        dec a
+        ld (s+State.spring_t),a
+        ld b,16
+        jr z,.release
+        cp 5
+        jr c,.half
+        cp 9
+        jr nc,.half
+        ld b,0
+        jr .place
+.half:  ld b,8
+        jr .place
+.release:ld a,-9
+        ld (s+State.vy),a
+        xor a
+        ld (s+State.floor),a
+.place: ld a,(s+State.spring_y)
+        sub b
+        ld (s+State.py),a
+        ret

@@ -142,6 +142,23 @@ def run_tape(name):
                     p = symbols["actors"] - 0xC000 + i
                     if ram[p]:
                         flags.add(ram[p + 4])
+            if name == "spring-5-2":
+                # Inspect the actual sprite list prepared by this cartridge.
+                p = symbols["sat"] - 0xC000
+                patterns = set()
+                for i in range(32):
+                    if ram[p + 4 * i] == 0xD0:
+                        break
+                    patterns.add(ram[p + 4 * i + 2])
+                else:
+                    raise AssertionError("unterminated sprite table")
+                flags.update(patterns & {144, 152, 156})  # extended, half, compressed
+                mario = not patterns.isdisjoint({12, 116})
+                if st("above") and 32 <= st("py") < 225:
+                    assert not mario
+                    flags.add("offscreen")
+                if "offscreen" in flags and not st("above") and mario:
+                    flags.add("returned")
             count = ram[symbols["liftcount"] - 0xC000]
             for i in range(count):
                 p = symbols["liftbuf"] - 0xC000 + i * 5
@@ -190,6 +207,10 @@ select(25)
 flags, _ = run_tape("swim-7-2")
 assert {4, 14} <= flags and 9 not in flags and st("stage") == 26
 core.retro_reset()
+select(17)
+flags, _ = run_tape("spring-5-2")
+assert {144, 152, 156, "offscreen", "returned"} <= flags
+core.retro_reset()
 select(7)
 flags, _ = run_tape("castle-2-4")
 assert {13, 6, 5} <= flags and st("stage") == 8  # Podoboo, firebar, Bowser
@@ -234,5 +255,5 @@ assert st("lives") == 3 and st("stage") == 0
 assert video_sizes == {(256, 192)}
 core.retro_deinit()
 print(
-    f"PASS: {video_frames} frames; 1-1 Starman and bonus routes, 1-2 roof to world 2, 1-3 moving lifts, 2-1 spawn, 2-2 and 7-2 swims, 2-4 castle clear, music, selector wrap and restart"
+    f"PASS: {video_frames} frames; 1-1 Starman and bonus routes, 1-2 roof to world 2, 1-3 moving lifts, 2-1 spawn, 2-2 and 7-2 swims, 2-4 castle clear, 5-2 spring and offscreen return, music, selector wrap and restart"
 )

@@ -68,6 +68,9 @@ tall    byte
 morph   byte
 theme   byte                    ; last uploaded theme + 1
 duck    byte
+spring_y byte                   ; 0 if no spring is visible
+spring_x byte
+spring_t byte                   ; compression/rebound countdown
 satpage byte                    ; 0 or 4: SAT at $1b00 or $1f00
 posetab byte                    ; 0 or 104: active pose pattern base
         ends
@@ -114,7 +117,7 @@ boot:   ld sp,$c400
         ld hl,0
         ld de,patterns
         call three_banks
-        ld hl,$3800
+        ld hl,$3800+24*8
         call address
         ld hl,sprites
         ld de,sprites_end-sprites
@@ -252,8 +255,14 @@ play:   call prepare_sprites
         call clock
         call move_lifts
         call carry_lift
-        call move_x
+        ld a,(s+State.spring_t)
+        or a
+        jr z,.free
+        call spring_recoil
+        jr .moved
+.free:  call move_x
         call move_y
+.moved:
         ld a,(s+State.kind)
         cp 2
         jr nz,.y_done
@@ -430,6 +439,8 @@ load_area:
         ld (s+State.star+1),a
         ld (s+State.starvel),a
         ld (liftcount),a
+        ld (s+State.spring_t),a
+        ld (s+State.spring_y),a
         ld (s+State.speed),a
         ld (s+State.walkphase),a
         ld (s+State.animcount),a
@@ -468,7 +479,7 @@ load_area:
         jr .upload
 .land_art:cp 3
         jr nz,.upload
-        ld hl,sprites+184*8
+        ld hl,sprites+(184-24)*8
 .upload:ld de,256
         call transfer
         ld a,(s+State.kind)
@@ -735,10 +746,20 @@ died:   ld sp,$c400             ; also reachable from nested actor collision
         sub b
         sra a
         sra a
+        ld c,a
         ld hl,s+State.py
         add a,(hl)
         ld (hl),a
-        call draw_sprites
+        ; Track the signed world page during the death arc, too.
+        bit 7,c
+        jr z,.descending
+        jr c,.sprite
+        ld a,1
+        jr .page
+.descending:jr nc,.sprite
+        xor a
+.page:  ld (s+State.above),a
+.sprite:call draw_sprites
         pop bc
         djnz .death
         call checkpoint
@@ -836,7 +857,7 @@ pulse_colors: incbin "../build/sg1000/pulse.bin"
 logo:   incbin "../build/sg1000/title.bin"
 patterns: incbin "../build/sg1000/patterns.bin"
 patterns_end:
-sprites:  incbin "../build/sg1000/sprites.bin"
+sprites:  incbin "../build/sg1000/sprites.bin",24*8
 sprites_end:
 outdoor_patterns: incbin "../build/sg1000/outdoor.bin"
 swim_patterns: incbin "../build/sg1000/swim.bin"

@@ -88,6 +88,8 @@ def area(name, kind):
         op, n = b >> 4, (b & 15) + 1
         if y < 12:
             if op == 0:
+                if b == 11:
+                    put(x, y + 1, 0x68)  # foot of the two-row jumpspring
                 if kind == 0 and b == 9:
                     goal = x
                     put(x, y + 1, 0x6C)
@@ -106,7 +108,7 @@ def area(name, kind):
                         0x55,
                         0x6B,
                         0xC4,
-                        0x68,
+                        0x67,
                         0,
                         0,
                         0,
@@ -496,8 +498,13 @@ def graphics():
     # Mirror each 16-row TMS sprite column for the downward pose.
     up = bytes(sprites[-64:])
     sprites.extend(b"".join(up[i : i + 16][::-1] for i in range(0, 64, 16)))
-    for pose in (0x30, 0x34):
-        pair(enemy, range(pose, pose + 4))
+    # Source spring frames: extended (two halves), half, fully compressed.
+    # One shared red cap pattern plus four light-colored coil shapes.
+    bank = enemy[1024:]
+    for pose in (0x16, 0x36, 0x38, 0x14):
+        half = bank[pose * 16 : (pose + 2) * 16]
+        right = half if pose == 0x14 else bytes(int(f"{b:08b}"[::-1], 2) for b in half)
+        pair(half + right, range(4), ((2, 3),))
     # The original shell uses the same half, mirrored on the right.
     shell = enemy[0x1A * 16 : 0x1C * 16]
     pair(shell + bytes(int(f"{b:08b}"[::-1], 2) for b in shell), range(4))
@@ -523,6 +530,7 @@ def graphics():
     for mask in ((2,), (1, 3)):
         sprite(sprites, enemy[1024:], 0x32, False, mask)
     assert len(sprites) == 252 * 8
+    sprites.extend((bytes([255, 255]) + bytes(14)) * 2)  # 252: spring cap
     (OUT / "sprites.bin").write_bytes(sprites)
     # Swap the castle boss out of VRAM for the outdoor enemy bank.
     sprites = bytearray()
@@ -717,6 +725,9 @@ def compile_game():
                         f" dw {x * 16}",
                         f" db {max(0, min(11, y - 1)) * 16},{b & 63}",
                     ]
+            for x, y, b in objects(table("L_" + name)[2:]):
+                if y < 12 and b == 11:
+                    asm.extend([f" dw {16 * x}", f" db {16 * y},$0b"])
             asm += [" dw 65535", f"enemies_{name}:"]
             for x, y, style in spawns:
                 asm += [

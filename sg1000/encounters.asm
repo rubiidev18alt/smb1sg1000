@@ -164,9 +164,10 @@ hazard_sprite:
         add a,d
         rra
         ld d,a
-        ld a,(ix+Actor.y)
-        add a,e
-        rra
+        ld a,e                  ; interpolate signed displacement, not wrapped Y
+        sub (ix+Actor.y)
+        sra a
+        add a,(ix+Actor.y)
         ld e,a
         ld b,11
         jp layer

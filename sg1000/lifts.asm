@@ -5,6 +5,7 @@ liftbuf   equ $c201             ; x word, y, signed dx, signed dy (max 8)
 move_lifts:
         xor a
         ld (liftcount),a
+        ld (s+State.spring_y),a
         ld ix,(s+State.lifts)
         ld iy,liftbuf
 .scan:  ld l,(ix+0)
@@ -16,6 +17,18 @@ move_lifts:
         or a
         sbc hl,de
         ld b,(ix+2)
+        ld a,(ix+3)
+        cp $0b
+        jr nz,.moving
+        ld a,h
+        or a
+        jp nz,.skip
+        ld a,l
+        ld (s+State.spring_x),a
+        ld a,b
+        ld (s+State.spring_y),a
+        jp .skip
+.moving:
         ld a,(s+State.tick)
         add a,(ix+0)
         and 127
@@ -186,3 +199,46 @@ lift_sprites:
         dec ixl
         jr nz,.loop
         ret
+
+; Both red caps and the coil use the same anchor as the collision tile.
+spring_sprite:
+        ld a,(s+State.spring_y)
+        or a
+        ret z
+        add a,21                ; fixed lower cap: world Y + 22, minus SAT bias
+        ld e,a
+        ld a,(s+State.spring_x)
+        ld d,a
+        ld b,8
+        ld c,252
+        call layer
+        ld a,(s+State.spring_t)
+        or a
+        jr z,.extended
+        cp 5
+        jr c,.half
+        cp 9
+        jr nc,.half
+        ld a,e
+        sub 6
+        ld c,156
+        jr .top
+.half:  ld a,e
+        sub 14
+        ld c,152
+        jr .top
+.extended:ld a,e
+        sub 6
+        ld e,a
+        ld b,11
+        ld c,148
+        call layer
+        ld a,e
+        sub 16
+        ld c,144
+.top:   ld e,a
+        ld b,11
+        call layer
+        ld b,8
+        ld c,252
+        jp layer

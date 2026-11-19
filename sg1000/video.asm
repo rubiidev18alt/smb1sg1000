@@ -267,29 +267,41 @@ prepare_sprites:
         jr nz,.others
         ld a,(s+State.px)
         ld d,a
+        ; Keep the page until after projection. A high spring jump can go
+        ; far enough above Y=0 that its low byte looks like a visible row.
+        push hl
+        ld a,(s+State.above)
+        neg
+        ld h,a
         ld a,(s+State.py)
-        dec a
-        ld e,a
-        ld a,(s+State.posetab)
-        add a,12
+        ld l,a
+        ld a,(s+State.yview)
         ld c,a
+        ld b,0
+        add hl,bc               ; signed screen Y of the lower half
+        ex (sp),hl              ; HL = SAT cursor, stack = projected Y
         ld a,(s+State.tall)
         or a
-        jr z,.player
-        ld a,e
+        jr z,.bottom
+        pop bc
+        push bc
+        ld a,c
         sub 16
         ld e,a
+        ld a,b
+        sbc a,0
+        ld b,a
         ld a,(s+State.posetab)
         ld c,a
-        call player_layers
-        ld a,e
-        add a,16
-        ld e,a
+        call player_half
+.bottom:pop bc
+        ld e,c
         ld a,(s+State.posetab)
         add a,12
         ld c,a
-.player:call player_layers
-.others:call lift_sprites
+        call player_half
+.others:call spring_sprite
+        call lift_sprites
         ld ix,actors
         call enemy_sprite
         ld ix,actors+Actor
@@ -300,6 +312,8 @@ prepare_sprites:
         ld a,(item+Actor.x)
         ld d,a
         ld a,(item+Actor.y)
+        cp 192
+        jr nc,.end
         dec a
         ld e,a
         ld c,232
@@ -349,7 +363,21 @@ short_upload:
         nop
         jp nz,.copy
         ret
-player_layers:
+; B:E is signed screen Y. Only -15..191 can contribute visible pixels.
+player_half:
+        ld a,b
+        or a
+        jr nz,.negative
+        ld a,e
+        cp 192
+        ret nc
+        jr .emit
+.negative:inc a
+        ret nz
+        ld a,e
+        cp 241
+        ret c
+.emit:  dec e                   ; TMS9918 SAT stores top minus one
         ld b,8                  ; fire suit substitutes white for cap/overalls
         ld a,(s+State.big)
         cp 2
@@ -366,22 +394,44 @@ player_layers:
         add a,7
         ld b,a
 .skin:
-        call layer
+        call screen_layer
         inc c
         inc c
         inc c
         inc c
         ld b,11
-        call layer
+        call screen_layer
         inc c
         inc c
         inc c
         inc c
         ld b,1
-layer:  ld a,(s+State.yview)
+        jp screen_layer
+
+; Non-player object anchors are in the playfield. Their 16px sub-sprites
+; may extend just above row zero. Cull BEFORE narrowing to an SAT byte.
+layer:  ld a,e
+        cp 224                  ; signed top-edge offset (SAT bias included)
+        ld a,(s+State.yview)
+        jr nc,.negative
         add a,e
-        cp $d0                  ; reserved SAT terminator, hide clipped layers
-        ret z
+        ret c
+.check: cp 191                  ; SAT 191 means a top of 192, off bottom
+        ret nc
+        jr screen_layer.store
+.negative:add a,e
+        jr c,.check
+        cp 240                  ; SAT $f0..$ff = legitimate partial top edge
+        ret c
+        jr screen_layer.store
+screen_layer:ld a,e             ; player_half has already clipped this part
+.store:  push af
+        ld a,l
+        cp (sat+31*4)%256       ; always leave room for the SAT terminator
+        jr c,.room
+        pop af
+        ret
+.room:  pop af
         ld (hl),a
         inc hl
         ld a,(s+State.phase)
@@ -412,7 +462,10 @@ enemy_sprite:
         or a
         ret z
         ld d,(ix+Actor.x)
-        ld e,(ix+Actor.y)
+        ld a,(ix+Actor.y)
+        cp 192
+        ret nc
+        ld e,a
         dec e
         ld a,(ix+Actor.style)
         cp 14

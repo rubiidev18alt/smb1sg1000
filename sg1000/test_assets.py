@@ -98,6 +98,11 @@ class CartridgeTest(unittest.TestCase):
                 for x, y, b in objects(table("E_" + name) + [255], True)
                 if 0x24 <= b & 63 <= 0x2C
             ]
+            expected.extend(
+                (x * 16, y * 16, 11)
+                for x, y, b in objects(table("L_" + name)[2:])
+                if y < 12 and b == 11
+            )
             for x, y, style in expected:
                 self.assertEqual(
                     (word(lift), rom[lift + 2], rom[lift + 3]), (x, y, style)
